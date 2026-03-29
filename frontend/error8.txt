@@ -1,0 +1,66 @@
+﻿node : C:\AEGIS\frontend\n
+ode_modules\nativewind\dis
+t\metro\tailwind\v3\index.
+js:77
+At line:1 char:1
++ node -e "require('./metr
+o.config.js')" > 
+error.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo        
+      : NotSpecified: (C  
+  :\AEGIS\fronte...\v3\   
+ index.js:77:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+        throw new 
+Error("Tailwind CSS has 
+not been configured with 
+the NativeWind preset");
+        ^
+
+Error: Tailwind CSS has 
+not been configured with 
+the NativeWind preset
+    at tailwindConfigV3 (C
+:\AEGIS\frontend\node_modu
+les\nativewind\dist\metro\
+tailwind\v3\index.js:77:15
+)
+    at tailwindConfig (C:\
+AEGIS\frontend\node_module
+s\nativewind\dist\metro\ta
+ilwind\index.js:19:42)
+    at withNativeWind (C:\
+AEGIS\frontend\node_module
+s\nativewind\dist\metro\in
+dex.js:18:57)
+    at Object.<anonymous> 
+(C:\AEGIS\frontend\metro.c
+onfig.js:6:18)
+    at Module._compile (no
+de:internal/modules/cjs/lo
+ader:1688:14)
+    at Object..js (node:in
+ternal/modules/cjs/loader:
+1820:10)
+    at Module.load (node:i
+nternal/modules/cjs/loader
+:1423:32)
+    at Function._load (nod
+e:internal/modules/cjs/loa
+der:1246:12)
+    at 
+TracingChannel.traceSync (
+node:diagnostics_channel:3
+22:14)
+    at wrapModuleLoad (nod
+e:internal/modules/cjs/loa
+der:235:24)
+
+Node.js v22.18.0

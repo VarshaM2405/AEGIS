@@ -1,0 +1,30 @@
+# AEGIS Safety App GitIgnore
+
+# Dependencies
+node_modules/
+venv/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+
+# Build/Expo
+.expo/
+dist/
+web-build/
+android/
+ios/
+
+# Data & Models
+*.pkl
+backend/data/*.csv
+
+# Database
+*.db
+*.sqlite
+
+# Artifacts
+.gemini/
+.agent/
+.agents/
+.anthropic/
