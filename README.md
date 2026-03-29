@@ -45,7 +45,7 @@ cd AEGIS
 
 > [!IMPORTANT]
 > Ensure your PostgreSQL service is running. The default credentials are in `database.py`: `aegis_user:aegis_password` on DB `aegis`.
-
+>Or Open Docker for Windows AMD64 (I used this) and kep it open and running
 ---
 
 ### Step 3: Frontend Setup (React Native & Expo)
