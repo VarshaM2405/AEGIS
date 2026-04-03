@@ -1,0 +1,21 @@
+Random Forest Results:
+Test Acc: 0.9787, Pre: 0.9843, Rec: 0.9744, F1: 0.9793
+CV Acc: 0.9763 +/- 0.0010
+
+
+Feature Importances:
+Latitude: 0.0680
+Longitude: 0.1082
+Time of Incident: 0.1686
+Crime Intensity/Spatial Density: 0.4178
+Hotspot Proximity: 0.2291
+Geo-Spatial Clustering ID: 0.0084
+
+XGBoost Results:
+Test Acc: 0.9766, Pre: 0.9829, Rec: 0.9717, F1: 0.9773
+CV Acc: 0.9752 +/- 0.0008
+
+Neural Network Results:
+Test Acc: 0.9671, Pre: 0.9699, Rec: 0.9663, F1: 0.9681
+CV Acc: 0.9640 +/- 0.0017
+

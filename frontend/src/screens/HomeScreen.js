@@ -38,7 +38,7 @@ export default function HomeScreen() {
   useEffect(() => {
     const fetchHeatmapData = async () => {
       try {
-        const HOST = '192.168.0.101'; 
+        const HOST = '192.168.0.152'; 
         const response = await fetch(`http://${HOST}:8000/api/crimes/heatmap`);
         const data = await response.json();
         if (Array.isArray(data)) {
@@ -116,7 +116,7 @@ export default function HomeScreen() {
         customMapStyle={darkMapStyle}
       >
          {userCoords && <Marker coordinate={userCoords} pinColor="blue" title="You" />}
-         {heatmapActive && heatmapPoints.slice(0, 3000).map((point, index) => {
+         {heatmapActive && heatmapPoints.map((point, index) => {
             const severity = point.weight;
             let color = 'rgba(0, 0, 255, 0.4)'; // Blue (Cold)
             if (severity >= 8) color = 'rgba(255, 0, 0, 0.5)'; // Hot Red

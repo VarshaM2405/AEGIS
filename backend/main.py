@@ -8,15 +8,24 @@ import time
 import joblib
 import numpy as np
 import requests
+from scipy.spatial import cKDTree
+from datetime import datetime
 
 app = FastAPI(title="AEGIS API")
 
 # Load pre-trained Random Forest ML Model for Routing Safety
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "safety_model.pkl")
+safety_data = None
 safety_model = None
+kmeans_model = None
+crime_tree = None
+
 if os.path.exists(MODEL_PATH):
-    safety_model = joblib.load(MODEL_PATH)
-    print("Machine Learning Safety Model Loaded Succesfully!")
+    safety_data = joblib.load(MODEL_PATH)
+    safety_model = safety_data.get('model')
+    kmeans_model = safety_data.get('kmeans')
+    crime_tree = safety_data.get('crime_tree')
+    print("Machine Learning Safety Model and Spatial Trees Loaded Successfully!")
 else:
     print("Warning: safety_model.pkl not found! Routes will not have active ML scoring.")
 
@@ -74,22 +83,20 @@ def get_heatmap_data(db = Depends(get_db)):
         SELECT lat, lon, max_weight
         FROM (
             SELECT 
-                AVG(latitude) as lat, 
-                AVG(longitude) as lon, 
-                MAX(severity) as max_weight,
+                latitude as lat, 
+                longitude as lon, 
+                severity as max_weight,
                 ROW_NUMBER() OVER(
-                    PARTITION BY ROUND(CAST(AVG(latitude) AS numeric), 2), ROUND(CAST(AVG(longitude) AS numeric), 2) 
-                    ORDER BY MAX(severity) DESC
+                    PARTITION BY ROUND(CAST(latitude AS numeric), 2), ROUND(CAST(longitude AS numeric), 2) 
+                    ORDER BY severity DESC
                 ) as rn
             FROM crime_incidents
-            WHERE severity >= 3
-              AND latitude BETWEEN 12.0 AND 14.0
-              AND longitude BETWEEN 77.0 AND 78.0
-            GROUP BY ROUND(CAST(latitude AS numeric), 3), ROUND(CAST(longitude AS numeric), 3)
+            WHERE latitude BETWEEN 12.5 AND 13.5
+              AND longitude BETWEEN 77.4 AND 77.9
         ) sub
-        WHERE rn <= 2
+        WHERE rn <= 10
         ORDER BY max_weight DESC
-        LIMIT 3000;
+        LIMIT 6000;
     """)
     results = db.execute(query).fetchall()
     
@@ -128,12 +135,37 @@ def get_safe_routes(start_lat: float, start_lon: float, end_lat: float, end_lon:
         
         danger_score = 0.0
         
-        if safety_model and len(coords) > 0:
-            # Reformat geometry coordinates to match ML training format (Latitude, Longitude)
-            test_points = np.array([[c[1], c[0]] for c in coords])
+        if safety_model and crime_tree and kmeans_model and len(coords) > 0:
+            # 1. Coordinate Prep
+            test_coords = np.array([[c[1], c[0]] for c in coords])
+            
+            # 2. Time context (Current hour)
+            current_hour = datetime.now().hour
+            times = np.full((len(test_coords), 1), current_hour)
+            
+            # 3. Spatial Density (Inverse mean distance to 50 nearest crimes)
+            dists, _ = crime_tree.query(test_coords, k=50)
+            spatial_density = 1.0 / (np.mean(dists, axis=1) + 1e-6)
+            
+            # 4. Hotspot Proximity (Distance to nearest kmeans cluster center)
+            cluster_centers = kmeans_model.cluster_centers_
+            hotspot_tree = cKDTree(cluster_centers)
+            h_dist, _ = hotspot_tree.query(test_coords, k=1)
+            
+            # 5. Geo-Spatial Clustering ID
+            cluster_ids = kmeans_model.predict(test_coords)
+            
+            # 6. Combine all 6 features: Lat, Lon, Time, Density, HotspotDist, ClusterID
+            X_inference = np.column_stack((
+                test_coords, 
+                times, 
+                spatial_density, 
+                h_dist, 
+                cluster_ids
+            ))
             
             # Run the route through the geographic Random Forest pipeline
-            predictions = safety_model.predict(test_points)
+            predictions = safety_model.predict(X_inference)
             
             # The danger algorithm averages the route severity, but aggressively penalizes 
             # if the route cuts directly through a Level 10 red zone.
