@@ -34,15 +34,14 @@ Base.metadata.create_all(bind=engine)
 
 @app.on_event("startup")
 def load_csv_data():
-    # Adding a small sleep so that the DB container has time to be fully ready if started together via compose
-    time.sleep(2)
     db = SessionLocal()
     try:
         data_dir = os.path.join(os.path.dirname(__file__), "data")
         
         # 1. Load Crime Data
-        if db.query(models.CrimeIncident).count() < 1000:
-            print("Clearing dummy data and loading CSV into memory...")
+        # Ensure we have the full dataset (> 30,000 records)
+        if db.query(models.CrimeIncident).count() < 30000:
+            print("Full dataset not found. Clearing and loading 32,500+ crime coordinates...")
             db.query(models.CrimeIncident).delete()
             db.commit()
             crime_file = os.path.join(data_dir, "bangalore_crime_data.csv")
