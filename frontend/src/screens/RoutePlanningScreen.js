@@ -8,7 +8,7 @@ import * as Location from 'expo-location';
 const { width, height } = Dimensions.get('window');
 
 // Dynamically use the same IP as HomeScreen for consistency
-const HOST = Platform.OS === 'android' ? '192.168.0.101' : '192.168.0.101'; 
+const HOST = Platform.OS === 'android' ? '192.168.0.152' : '192.168.0.152'; 
 
 export default function RoutePlanningScreen() {
   const navigation = useNavigation();
