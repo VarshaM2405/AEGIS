@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="aegis_logo_final.png" alt="AEGIS Logo" width="200" />
-</p>
-
 # AEGIS: The Safety Route Predictor 🛡️📍
 
 A high-performance Safety Navigation application that uses **Machine Learning (Random Forest)** to analyze 32,500+ crime records across Bengaluru and predict the safest possible walking or driving paths.
