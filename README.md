@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="aegis_logo_pink.png" alt="AEGIS Logo" width="200" />
+  <img src="aegis_logo_final.png" alt="AEGIS Logo" width="200" />
 </p>
 
 # AEGIS: The Safety Route Predictor 🛡️📍
