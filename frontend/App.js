@@ -4,15 +4,25 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GlobalProvider } from './src/contexts/GlobalContext';
 import AppNavigator from './src/navigation/AppNavigator';
-import GlobalSOSButton from './src/components/GlobalSOSButton';
+import { useFonts, Cinzel_400Regular, Cinzel_700Bold } from '@expo-google-fonts/cinzel';
+import { Outfit_400Regular, Outfit_700Bold } from '@expo-google-fonts/outfit';
+// import GlobalSOSButton from './src/components/GlobalSOSButton';
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    Cinzel_400Regular,
+    Cinzel_700Bold,
+    Outfit_400Regular,
+    Outfit_700Bold,
+  });
+
+  if (!fontsLoaded) return null;
+
   return (
     <SafeAreaProvider style={styles.container}>
       <GlobalProvider>
         <NavigationContainer>
           <AppNavigator />
-          <GlobalSOSButton />
         </NavigationContainer>
       </GlobalProvider>
     </SafeAreaProvider>

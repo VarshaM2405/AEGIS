@@ -8,13 +8,30 @@ import time
 import joblib
 import numpy as np
 import requests
+import random
 from scipy.spatial import cKDTree
-from datetime import datetime
+from datetime import datetime, timedelta
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="AEGIS API")
 
+# Add CORS Middleware to allow all origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    print(f"Incoming Request: {request.method} {request.url}")
+    return await call_next(request)
+
 # Load pre-trained Random Forest ML Model for Routing Safety
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "safety_model.pkl")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "aegis_safety_v2.pkl")
 safety_data = None
 safety_model = None
 kmeans_model = None
@@ -28,6 +45,21 @@ if os.path.exists(MODEL_PATH):
     print("Machine Learning Safety Model and Spatial Trees Loaded Successfully!")
 else:
     print("Warning: safety_model.pkl not found! Routes will not have active ML scoring.")
+
+# Pydantic Schemas for Auth
+class PhoneRequest(BaseModel):
+    phone: str
+
+class VerifyRequest(BaseModel):
+    phone: str
+    otp_code: str
+
+class RegisterRequest(BaseModel):
+    phone: str
+    name: str
+    area: str
+    latitude: float
+    longitude: float
 
 # Create all tables (note: PostGIS extension must be active in DB)
 Base.metadata.create_all(bind=engine)
@@ -75,26 +107,93 @@ def load_csv_data():
 def health_check():
     return {"status": "ok", "app": "AEGIS API"}
 
+# --- AUTHENTICATION ENDPOINTS ---
+
+@app.post("/api/auth/send-otp")
+def send_otp(req: PhoneRequest, db=Depends(get_db)):
+    """Generates and 'sends' a 4-digit OTP."""
+    otp_code = f"{random.randint(1000, 9999)}"
+    expires_at = datetime.now() + timedelta(minutes=5)
+    
+    # Update or create OTP record
+    existing_otp = db.query(models.UserOTP).filter(models.UserOTP.phone == req.phone).first()
+    if existing_otp:
+        existing_otp.otp_code = otp_code
+        existing_otp.expires_at = expires_at
+    else:
+        new_otp = models.UserOTP(phone=req.phone, otp_code=otp_code, expires_at=expires_at)
+        db.add(new_otp)
+    
+    db.commit()
+    
+    # SIMULATED SMS SENDING
+    print("\n" + "="*40)
+    print(f"SMS SENT TO: {req.phone}")
+    print(f"YOUR AEGIS OTP IS: {otp_code}")
+    print("="*40 + "\n")
+    
+    return {"status": "sent", "message": "OTP log generated in backend terminal."}
+
+@app.post("/api/auth/verify-otp")
+def verify_otp(req: VerifyRequest, db=Depends(get_db)):
+    """Verifies the 4-digit OTP and returns user status."""
+    otp_record = db.query(models.UserOTP).filter(
+        models.UserOTP.phone == req.phone,
+        models.UserOTP.otp_code == req.otp_code
+    ).first()
+    
+    if not otp_record or otp_record.expires_at < datetime.now():
+        return {"status": "failed", "message": "Invalid or expired OTP"}
+    
+    # Check if user exists
+    user = db.query(models.User).filter(models.User.phone == req.phone).first()
+    if not user:
+        # Create a skeleton user
+        user = models.User(phone=req.phone, is_verified=True)
+        db.add(user)
+    else:
+        user.is_verified = True
+    
+    db.delete(otp_record) # Cleanup
+    db.commit()
+    
+    return {
+        "status": "success", 
+        "user_exists": user.name is not None,
+        "user": {
+            "name": user.name,
+            "area": user.area
+        }
+    }
+
+@app.post("/api/auth/register")
+def register_user(req: RegisterRequest, db=Depends(get_db)):
+    """Completes the user profile registration."""
+    user = db.query(models.User).filter(models.User.phone == req.phone).first()
+    if not user:
+        return {"status": "error", "message": "User must verify phone first"}
+    
+    user.name = req.name
+    user.area = req.area
+    user.latitude = req.latitude
+    user.longitude = req.longitude
+    
+    # Set PostGIS geometry
+    geom_wkt = f"SRID=4326;POINT({req.longitude} {req.latitude})"
+    user.geom = geom_wkt
+    
+    db.commit()
+    return {"status": "success", "message": "Profile completed"}
+
 @app.get("/api/crimes/heatmap")
 def get_heatmap_data(db = Depends(get_db)):
     """Fetch clustered crime incidents for the frontend heat map."""
     query = text("""
-        SELECT lat, lon, max_weight
-        FROM (
-            SELECT 
-                latitude as lat, 
-                longitude as lon, 
-                severity as max_weight,
-                ROW_NUMBER() OVER(
-                    PARTITION BY ROUND(CAST(latitude AS numeric), 2), ROUND(CAST(longitude AS numeric), 2) 
-                    ORDER BY severity DESC
-                ) as rn
-            FROM crime_incidents
-            WHERE latitude BETWEEN 12.5 AND 13.5
-              AND longitude BETWEEN 77.4 AND 77.9
-        ) sub
-        WHERE rn <= 10
-        ORDER BY max_weight DESC
+        SELECT latitude as lat, longitude as lon, severity as max_weight
+        FROM crime_incidents
+        WHERE latitude BETWEEN 12.5 AND 13.5
+          AND longitude BETWEEN 77.4 AND 77.9
+        ORDER BY severity DESC
         LIMIT 6000;
     """)
     results = db.execute(query).fetchall()

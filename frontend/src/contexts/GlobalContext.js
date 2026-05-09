@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect } from 'react';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const GlobalContext = createContext();
 
@@ -7,8 +8,40 @@ export const GlobalProvider = ({ children }) => {
   const [isSOSActive, setIsSOSActive] = useState(false);
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [user, setUser] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isContextLoaded, setIsContextLoaded] = useState(false);
 
   const toggleSOS = () => setIsSOSActive(!isSOSActive);
+  
+  const handleSetUser = async (userData) => {
+    setUser(userData);
+    setIsLoggedIn(true);
+    await AsyncStorage.setItem('@aegis_user', JSON.stringify(userData));
+  };
+
+  const logout = async () => { 
+    setUser(null); 
+    setIsLoggedIn(false); 
+    await AsyncStorage.removeItem('@aegis_user');
+  };
+
+  useEffect(() => {
+    const loadState = async () => {
+      try {
+        const storedUser = await AsyncStorage.getItem('@aegis_user');
+        if (storedUser) {
+          setUser(JSON.parse(storedUser));
+          setIsLoggedIn(true);
+        }
+      } catch (e) {
+        console.error("Failed to load user state", e);
+      } finally {
+        setIsContextLoaded(true);
+      }
+    };
+    loadState();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -43,7 +76,10 @@ export const GlobalProvider = ({ children }) => {
   }, []);
 
   return (
-    <GlobalContext.Provider value={{ isSOSActive, toggleSOS, location, errorMsg }}>
+    <GlobalContext.Provider value={{ 
+      isSOSActive, toggleSOS, location, errorMsg, 
+      user, setUser: handleSetUser, isLoggedIn, setIsLoggedIn, logout, isContextLoaded
+    }}>
       {children}
     </GlobalContext.Provider>
   );

@@ -7,7 +7,7 @@ from sklearn.cluster import KMeans
 import joblib
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "bangalore_crime_data.csv")
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "safety_model.pkl")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "aegis_safety_v2.pkl")
 
 def feature_engineering(X, crime_tree, kmeans_model):
     # 1. Spatial Density
@@ -41,14 +41,14 @@ def generate_and_train_model():
     print("Generating synthetic Safe Zones for Machine Learning...")
     crime_tree = cKDTree(X_positive_coords)
     
-    safe_latitudes = np.random.uniform(12.7, 13.3, 100000) 
-    safe_longitudes = np.random.uniform(77.4, 77.8, 100000)
+    safe_latitudes = np.random.uniform(12.7, 13.3, 20000) 
+    safe_longitudes = np.random.uniform(77.4, 77.8, 20000)
     candidate_safes = np.column_stack((safe_latitudes, safe_longitudes))
     
     distances, _ = crime_tree.query(candidate_safes, k=1)
     safe_zones = candidate_safes[distances > 0.005]
     
-    num_safe = min(len(safe_zones), 30000)
+    num_safe = min(len(safe_zones), 10000)
     safe_zones = safe_zones[:num_safe]
     X_negative_coords = safe_zones
     y_negative = np.zeros(len(X_negative_coords)) # Severity 0
