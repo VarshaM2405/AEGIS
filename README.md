@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="aegis_logo.png" alt="AEGIS Logo" width="200" />
+</p>
+
 # AEGIS: The Safety Route Predictor 🛡️📍
 
 A high-performance Safety Navigation application that uses **Machine Learning (Random Forest)** to analyze 32,500+ crime records across Bengaluru and predict the safest possible walking or driving paths.
@@ -7,7 +11,7 @@ A high-performance Safety Navigation application that uses **Machine Learning (R
 *   **🚀 97.8% Accuracy Milestone:** Powered by a high-performance **Random Forest Regressor** with advanced feature engineering (**Spatial Density** & **K-Means Clustering**).
 *   **🔥 Live Safety Heatmap:** Visualizes crime hotspots with high-contrast, scalable geographic markers.
 *   **🧠 AI-Scored Routing:** Unlike Google Maps, AEGIS evaluates every meter of a path and ranks alternatives as **FASTEST**, **SAFEST**, or **BALANCED** based on geographic risk profiles.
-*   **🕹️ Navigation Mode:** 45-degree tilted camera, live compass heading tracking, and real-time GPS progress.
+*   **🕹️ 3D Navigation Mode:** Features a fixed 45/55 split-screen dashboard, dynamic camera panning, and real-time GPS progress mapping.
 *   **🆓 Fully Open-Source Stack:** Uses OSRM, Nominatim, and Scikit-Learn. **No Google Cloud API keys or billing required!**
 
 ---
