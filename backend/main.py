@@ -1,7 +1,10 @@
 import os
+from typing import Optional
 import pandas as pd
-from fastapi import FastAPI, Depends
-from sqlalchemy import text
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy import text, or_
 from database import engine, Base, SessionLocal, get_db
 import models
 import time
@@ -13,6 +16,7 @@ from scipy.spatial import cKDTree
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+import math
 
 app = FastAPI(title="AEGIS API")
 
@@ -24,11 +28,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# @app.middleware("http")
-# async def log_requests(request, call_next):
-#     print(f"Incoming Request: {request.method} {request.url}")
-#     return await call_next(request)
 
 # Load pre-trained Random Forest ML Model for Routing Safety
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "aegis_safety_v2.pkl")
@@ -86,6 +85,15 @@ def get_user_info(db, phone: str):
         "profile_photo": None
     }
 
+def haversine_km(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two lat/lon points, in kilometers."""
+    R = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
 # Create all tables (note: PostGIS extension must be active in DB)
 Base.metadata.create_all(bind=engine)
 
@@ -97,6 +105,20 @@ def ensure_report_columns():
         db.commit()
     except Exception as e:
         print(f"Error ensuring report columns: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+@app.on_event("startup")
+def ensure_sos_columns():
+    db = SessionLocal()
+    try:
+        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_id VARCHAR"))
+        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_name VARCHAR"))
+        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_phone VARCHAR"))
+        db.commit()
+    except Exception as e:
+        print(f"Error ensuring sos columns: {e}")
         db.rollback()
     finally:
         db.close()
@@ -143,6 +165,132 @@ def load_csv_data():
 @app.get("/")
 def health_check():
     return {"status": "ok", "app": "AEGIS API"}
+
+class SOSTriggerRequest(BaseModel):
+    user_name: str
+    user_phone: str
+    latitude: float
+    longitude: float
+
+class SOSResponse(BaseModel):
+    id: int
+    user_name: str
+    user_phone: str
+    latitude: float
+    longitude: float
+    status: str
+    created_at: datetime
+    cancelled_at: Optional[datetime] = None
+    responder_id: Optional[str] = None
+    responder_name: Optional[str] = None
+    responder_phone: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class SOSRespondRequest(BaseModel):
+    responder_phone: str
+    responder_name: str
+
+@app.post("/api/sos/trigger", response_model=SOSResponse)
+def trigger_sos(payload: SOSTriggerRequest, db = Depends(get_db)):
+    """Create an active SOS event for the triggering user."""
+    sos = models.SOSEvent(
+        user_name=payload.user_name,
+        user_phone=payload.user_phone,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        status="active",
+    )
+    db.add(sos)
+    db.commit()
+    db.refresh(sos)
+    return sos
+
+@app.patch("/api/sos/{sos_id}/cancel", response_model=SOSResponse)
+def cancel_sos(sos_id: int, db = Depends(get_db)):
+    """Mark an SOS event as cancelled once the user confirms they're safe."""
+    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+    if not sos:
+        raise HTTPException(status_code=404, detail="SOS event not found")
+    sos.status = "cancelled"
+    sos.cancelled_at = datetime.utcnow()
+    db.commit()
+    db.refresh(sos)
+    return sos
+
+@app.get("/api/sos/active")
+def get_active_sos(lat: float, lon: float, radius: float = 5.0, exclude_phone: str = None, db = Depends(get_db)):
+    """Return active/responding SOS events within `radius` km of (lat, lon), nearest first."""
+    query = db.query(models.SOSEvent).filter(models.SOSEvent.status.in_(["active", "responding"]))
+    if exclude_phone:
+        query = query.filter(models.SOSEvent.user_phone != exclude_phone)
+
+    results = []
+    for e in query.all():
+        distance = haversine_km(lat, lon, e.latitude, e.longitude)
+        if distance <= radius:
+            results.append({
+                "id": e.id,
+                "user_name": e.user_name,
+                "user_phone": e.user_phone,
+                "latitude": e.latitude,
+                "longitude": e.longitude,
+                "status": e.status,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "responder_id": e.responder_id,
+                "responder_name": e.responder_name,
+                "responder_phone": e.responder_phone,
+                "distance_km": round(distance, 3),
+            })
+
+    results.sort(key=lambda r: r["distance_km"])
+    return {"sos_events": results}
+
+@app.post("/api/sos/{sos_id}/respond", response_model=SOSResponse)
+def respond_to_sos(sos_id: int, payload: SOSRespondRequest, db = Depends(get_db)):
+    """Claim an active SOS as a community responder.
+
+    Uses a single atomic conditional UPDATE (rather than read-then-write) so that
+    two near-simultaneous claims on the same SOS can't both succeed: the DB row
+    is only updated if it still satisfies all the claim conditions at UPDATE time,
+    closing the TOCTOU gap between the check and the commit.
+    """
+    updated = db.query(models.SOSEvent).filter(
+        models.SOSEvent.id == sos_id,
+        models.SOSEvent.status != "cancelled",
+        models.SOSEvent.user_phone != payload.responder_phone,
+        or_(models.SOSEvent.responder_id.is_(None), models.SOSEvent.responder_id == payload.responder_phone),
+    ).update({
+        "status": "responding",
+        "responder_id": payload.responder_phone,
+        "responder_name": payload.responder_name,
+        "responder_phone": payload.responder_phone,
+    }, synchronize_session=False)
+    db.commit()
+
+    if updated == 0:
+        # Nothing matched the atomic UPDATE's conditions — re-fetch to determine
+        # which specific error applies.
+        sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+        if not sos:
+            raise HTTPException(status_code=404, detail="SOS event not found")
+        if sos.status == "cancelled":
+            raise HTTPException(status_code=400, detail="This SOS is no longer active")
+        if sos.user_phone == payload.responder_phone:
+            raise HTTPException(status_code=400, detail="Cannot respond to your own SOS")
+        raise HTTPException(status_code=400, detail="This SOS is already being handled by another responder")
+
+    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+    return sos
+
+@app.get("/api/sos/{sos_id}/status", response_model=SOSResponse)
+def get_sos_status(sos_id: int, db = Depends(get_db)):
+    """Poll the current state of an SOS event (for the victim's screen)."""
+    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+    if not sos:
+        raise HTTPException(status_code=404, detail="SOS event not found")
+    return sos
 
 # --- AUTHENTICATION ENDPOINTS ---
 
@@ -254,7 +402,10 @@ def get_safe_routes(start_lat: float, start_lon: float, end_lat: float, end_lon:
     osrm_url = f"http://router.project-osrm.org/route/v1/driving/{start_lon},{start_lat};{end_lon},{end_lat}?alternatives=3&geometries=geojson&overview=full"
     
     headers = {"User-Agent": "AEGIS_Safety_App/1.0"}
-    resp = requests.get(osrm_url, headers=headers)
+    try:
+        resp = requests.get(osrm_url, headers=headers, timeout=10)
+    except requests.exceptions.RequestException:
+        return {"error": "Routing API completely failed."}
     if resp.status_code != 200:
         return {"error": "Routing API completely failed."}
         

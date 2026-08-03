@@ -1,12 +1,33 @@
-import React, { useContext } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image } from 'react-native';
+import React, { useContext, useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Image, Modal, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import { User, Shield, MapPin, PhoneForwarded, Settings, ChevronRight, LogOut, Award } from 'lucide-react-native';
+import { User, Shield, MapPin, PhoneForwarded, Settings, ChevronRight, LogOut, Award, X } from 'lucide-react-native';
 
 export default function ProfileScreen() {
-  const { user, logout } = useContext(GlobalContext);
+  const { user, logout, userProfile, setUserProfile } = useContext(GlobalContext);
+  const [contactModalVisible, setContactModalVisible] = useState(false);
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+
+  const openContactModal = () => {
+    setContactName(userProfile.emergencyContactName || '');
+    setContactPhone(userProfile.emergencyContactPhone || '');
+    setContactModalVisible(true);
+  };
+
+  const saveContact = () => {
+    if (contactPhone.trim().length < 10) {
+      return Alert.alert('Missing Info', 'Please add an emergency contact number.');
+    }
+    setUserProfile((prev) => ({
+      ...prev,
+      emergencyContactName: contactName.trim(),
+      emergencyContactPhone: contactPhone.trim(),
+    }));
+    setContactModalVisible(false);
+  };
 
   const stats = [
     { label: 'Shielded km', value: '124', icon: Shield, color: '#D81B60' },
@@ -45,10 +66,17 @@ export default function ProfileScreen() {
         {/* Section: Account & Safety */}
         <Text className="text-[#9E7A80] font-bold uppercase tracking-widest text-xs mb-4 ml-2">Safety Configuration</Text>
         <View className="bg-white rounded-[32px] shadow-sm border border-[#E5B2B9]50 overflow-hidden mb-8">
-          <TouchableOpacity className="flex-row items-center justify-between p-5 border-b border-gray-50">
-            <View className="flex-row items-center">
+          <TouchableOpacity onPress={openContactModal} className="flex-row items-center justify-between p-5 border-b border-gray-50">
+            <View className="flex-row items-center flex-1">
               <View className="bg-blue-50 p-2 rounded-xl mr-4"><PhoneForwarded size={20} color="#007AFF" /></View>
-              <Text className="font-bold text-[#4A2E35]">Emergency Contacts</Text>
+              <View className="flex-1">
+                <Text className="font-bold text-[#4A2E35]">Emergency Contacts</Text>
+                <Text className="text-[#9E7A80] text-xs mt-0.5" numberOfLines={1}>
+                  {userProfile.emergencyContactPhone
+                    ? `${userProfile.emergencyContactName || 'Unnamed'} · ${userProfile.emergencyContactPhone}`
+                    : 'Not set — tap to add'}
+                </Text>
+              </View>
             </View>
             <ChevronRight size={18} color="#D1D5DB" />
           </TouchableOpacity>
@@ -78,6 +106,47 @@ export default function ProfileScreen() {
         </TouchableOpacity>
 
       </ScrollView>
+
+      <Modal visible={contactModalVisible} animationType="slide" transparent onRequestClose={() => setContactModalVisible(false)}>
+        <View className="flex-1 bg-black/50 justify-center px-8">
+          <View className="bg-white rounded-[32px] p-6">
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-xl font-black text-[#4A2E35]">Emergency Contact</Text>
+              <TouchableOpacity onPress={() => setContactModalVisible(false)}>
+                <X size={22} color="#9E7A80" />
+              </TouchableOpacity>
+            </View>
+            <Text className="text-[#9E7A80] text-xs mb-5">We'll text them your live location during an SOS.</Text>
+
+            <View className="bg-[#FDF8F9] h-16 rounded-2xl flex-row items-center px-5 border border-[#E5B2B9]50 mb-4">
+              <User size={20} color="#DDA7A5" />
+              <TextInput
+                placeholder="Contact Name"
+                className="flex-1 ml-4 text-lg font-medium h-full"
+                value={contactName}
+                onChangeText={setContactName}
+              />
+            </View>
+            <View className="bg-[#FDF8F9] h-16 rounded-2xl flex-row items-center px-5 border border-[#E5B2B9]50 mb-6">
+              <PhoneForwarded size={20} color="#DDA7A5" />
+              <TextInput
+                placeholder="Contact Phone Number"
+                className="flex-1 ml-4 text-lg font-medium h-full"
+                keyboardType="phone-pad"
+                value={contactPhone}
+                onChangeText={setContactPhone}
+                maxLength={10}
+              />
+            </View>
+
+            <TouchableOpacity onPress={saveContact} activeOpacity={0.8}>
+              <LinearGradient colors={['#E5B2B9', '#D81B60']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} className="h-16 rounded-2xl items-center justify-center shadow-lg">
+                <Text className="text-white text-lg font-bold">Save Contact</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

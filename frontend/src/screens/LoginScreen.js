@@ -10,12 +10,14 @@ import { API_BASE_URL } from '../config';
 
 export default function LoginScreen() {
   const navigation = useNavigation();
-  const { location, setUser, setIsLoggedIn } = useContext(GlobalContext);
+  const { location, setUser, setIsLoggedIn, setUserProfile } = useContext(GlobalContext);
   const [step, setStep] = useState(1);
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [name, setName] = useState('');
   const [area, setArea] = useState('');
+  const [emergencyContactName, setEmergencyContactName] = useState('');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSendOTP = async () => {
@@ -53,6 +55,13 @@ export default function LoginScreen() {
       if (data.status === 'success') {
         if (data.user_exists) {
           setUser(data.user);
+          // Preserve any emergency contact already restored from storage —
+          // only name/phone come from this response, so don't blank the rest.
+          setUserProfile((prev) => ({
+            ...prev,
+            name: data.user.name || '',
+            phone: data.user.phone || '',
+          }));
           setIsLoggedIn(true);
           navigation.replace('Main');
         } else {
@@ -70,11 +79,12 @@ export default function LoginScreen() {
 
   const handleRegister = async () => {
     if (!name || !area) return Alert.alert("Missing Info", "Please fill all fields.");
+    if (emergencyContactPhone.length < 10) return Alert.alert("Missing Info", "Please add an emergency contact number.");
     setLoading(true);
     try {
       const lat = location?.coords?.latitude || 12.9716;
       const lon = location?.coords?.longitude || 77.5946;
-      
+
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -84,6 +94,8 @@ export default function LoginScreen() {
       if (data.status === 'success') {
         setUser({ name, area, phone });
         setIsLoggedIn(true);
+        // Carry the profile forward so SOSScreen knows who to text during an SOS
+        setUserProfile({ name, phone, area, emergencyContactName, emergencyContactPhone });
         navigation.replace('Main');
       } else {
         Alert.alert("Error", data.message || "Registration failed");
@@ -177,13 +189,35 @@ export default function LoginScreen() {
                   onChangeText={setName}
                 />
               </View>
-              <View className="bg-white h-16 rounded-2xl flex-row items-center px-5 shadow-sm border border-[#E5B2B9]50 mb-8">
+              <View className="bg-white h-16 rounded-2xl flex-row items-center px-5 shadow-sm border border-[#E5B2B9]50 mb-4">
                 <MapPin size={20} color="#DDA7A5" />
                 <TextInput
                   placeholder="Home Area (e.g. Indiranagar)"
                   className="flex-1 ml-4 text-lg font-medium h-full"
                   value={area}
                   onChangeText={setArea}
+                />
+              </View>
+              <Text className="text-[#9E7A80] font-bold uppercase text-xs mb-1">Emergency Contact</Text>
+              <Text className="text-[#9E7A80] text-xs mb-3">We'll text them your live location during an SOS.</Text>
+              <View className="bg-white h-16 rounded-2xl flex-row items-center px-5 shadow-sm border border-[#E5B2B9]50 mb-4">
+                <User size={20} color="#DDA7A5" />
+                <TextInput
+                  placeholder="Contact Name"
+                  className="flex-1 ml-4 text-lg font-medium h-full"
+                  value={emergencyContactName}
+                  onChangeText={setEmergencyContactName}
+                />
+              </View>
+              <View className="bg-white h-16 rounded-2xl flex-row items-center px-5 shadow-sm border border-[#E5B2B9]50 mb-8">
+                <Phone size={20} color="#DDA7A5" />
+                <TextInput
+                  placeholder="Contact Phone Number"
+                  className="flex-1 ml-4 text-lg font-medium h-full"
+                  keyboardType="phone-pad"
+                  value={emergencyContactPhone}
+                  onChangeText={setEmergencyContactPhone}
+                  maxLength={10}
                 />
               </View>
             </View>

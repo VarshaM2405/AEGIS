@@ -14,6 +14,20 @@ class CrimeIncident(Base):
     # PostGIS Geometry
     geom = Column(Geometry(geometry_type='POINT', srid=4326))
 
+class SOSEvent(Base):
+    __tablename__ = "sos_events"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(String)
+    user_phone = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    status = Column(String, default="active")  # active, responding, cancelled
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    cancelled_at = Column(DateTime, nullable=True)
+    responder_id = Column(String, nullable=True)
+    responder_name = Column(String, nullable=True)
+    responder_phone = Column(String, nullable=True)
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, autoincrement=True)

@@ -52,8 +52,10 @@ cd AEGIS
 ### Step 3: Frontend Setup (React Native & Expo)
 1.  **Enter the folder:** `cd ../frontend`
 2.  **Install Packages:** `npm install`
-3.  **Set Backend IP:** Open `src/screens/HomeScreen.js` and change the `HOST` constant to your laptop’s local IP (e.g., `192.168.0.x`).
-4.  **Launch Expo:** `npx expo start`
+3.  **Launch Expo:** `npx expo start`
+
+> [!NOTE]
+> The backend URL is now detected automatically (see `src/config.js`): it reuses the same LAN IP your phone already connects to Metro with, so no manual IP editing is needed. This only works when the backend and Metro run on the same machine (the setup above). If they don't — e.g. backend on another machine, or an emulator that needs a different address — create a `.env` file in `frontend/` with `EXPO_PUBLIC_API_HOST=<ip-or-host>` to override it.
 
 ---
 

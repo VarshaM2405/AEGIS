@@ -1,17 +1,34 @@
-import React, { useContext, useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert, Modal, Switch } from 'react-native';
+import React, { useContext, useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert, Modal, Switch, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Search, Send, Shield, MapPin, AlertTriangle, Bell, Layers } from 'lucide-react-native';
-import { MapView, Circle, Marker, PROVIDER_GOOGLE } from '../components/MapViewWrapper';
+import { MapView, Circle, Marker, Polyline, PROVIDER_GOOGLE } from '../components/MapViewWrapper';
 
 const { width } = Dimensions.get('window');
 import { API_BASE_URL } from '../config';
 
+function PulsingSOSMarker() {
+  const pulseAnim = React.useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.4, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  return (
+    <Animated.View style={{ transform: [{ scale: pulseAnim }], backgroundColor: '#FF1744', padding: 8, borderRadius: 20, borderWidth: 3, borderColor: 'white' }}>
+      <Text style={{ fontSize: 16 }}>🚨</Text>
+    </Animated.View>
+  );
+}
+
 export default function HomeScreen() {
-  const { location, user, notifications, removeNotification, clearNotifications } = useContext(GlobalContext);
+  const { location, user, notifications, removeNotification, clearNotifications, nearbySOS, respondToSOS } = useContext(GlobalContext);
   const navigation = useNavigation();
   const [heatmapData, setHeatmapData] = useState([]);
   const [reportAlerts, setReportAlerts] = useState([]);
@@ -20,7 +37,11 @@ export default function HomeScreen() {
   const [notificationModalVisible, setNotificationModalVisible] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
   const [responding, setResponding] = useState(false);
+  const [selectedSOS, setSelectedSOS] = useState(null);
+  const [respondingSOS, setRespondingSOS] = useState(false);
   const [activeStatusMessage, setActiveStatusMessage] = useState('No active alerts nearby');
+  const [responderRoute, setResponderRoute] = useState(null);
+  const mapRef = useRef(null);
 
   const [refreshInterval, setRefreshInterval] = useState(null);
 
@@ -202,6 +223,70 @@ export default function HomeScreen() {
     }
   };
 
+  const formatDistance = (km) => (km == null ? '—' : km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`);
+
+  useEffect(() => {
+    // Keep the open SOS modal in sync with live polling data from GlobalContext.
+    // GET /api/sos/active only ever returns status in ("active", "responding"), so
+    // an id disappearing from nearbySOS means it was resolved/cancelled (or moved
+    // out of radius) — in that case close the modal rather than show a stale
+    // snapshot with a "respond" button for an SOS that's no longer actionable.
+    setSelectedSOS((prev) => {
+      if (!prev) return prev;
+      const updated = nearbySOS.find((sos) => sos.id === prev.id);
+      return updated || null;
+    });
+  }, [nearbySOS]);
+
+  const handleRespondToSOS = async () => {
+    if (!selectedSOS) return;
+    const sosIdAtRequestTime = selectedSOS.id;
+    setRespondingSOS(true);
+    const result = await respondToSOS(sosIdAtRequestTime);
+    setRespondingSOS(false);
+    if (result.success) {
+      setSelectedSOS((current) =>
+        current && current.id === sosIdAtRequestTime
+          ? { ...result.sos, distance_km: current.distance_km }
+          : current
+      );
+    } else {
+      Alert.alert('Unable to respond', result.error);
+    }
+  };
+
+  // The SOS (if any) that this device is the assigned responder for, derived
+  // straight from the live-polled nearbySOS list so it always reflects the
+  // current backend state (e.g. clears itself if the victim cancels).
+  const myActiveResponse = nearbySOS.find((sos) => sos.responder_id === user?.phone) || null;
+
+  useEffect(() => {
+    if (!myActiveResponse || !location?.coords) {
+      setResponderRoute(null);
+      return;
+    }
+    let cancelled = false;
+    const { latitude, longitude } = location.coords;
+    const url = `${API_BASE_URL}/api/routes?start_lat=${latitude}&start_lon=${longitude}&end_lat=${myActiveResponse.latitude}&end_lon=${myActiveResponse.longitude}`;
+    fetch(url)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const best = data.routes && data.routes[0];
+        if (!best) return;
+        const coords = best.geometry.coordinates.map((c) => ({ latitude: c[1], longitude: c[0] }));
+        setResponderRoute(coords);
+        if (mapRef.current) {
+          mapRef.current.fitToCoordinates(coords, {
+            edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
+            animated: true,
+          });
+        }
+      })
+      .catch((err) => console.error('Responder route fetch failed:', err));
+    return () => { cancelled = true; };
+  }, [myActiveResponse?.id]);
+
   const renderSelectedReport = () => {
     if (!selectedReport) return null;
 
@@ -373,6 +458,53 @@ export default function HomeScreen() {
           </View>
         </Modal>
 
+        <Modal visible={!!selectedSOS} animationType="slide" transparent>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: '#fff', borderRadius: 30, padding: 24, borderWidth: 2, borderColor: '#FF1744' }}>
+              <Text style={{ fontSize: 20, fontWeight: '900', color: '#D81B60', marginBottom: 8 }}>🚨 Emergency SOS</Text>
+              {selectedSOS && (
+                <>
+                  <Text style={{ color: '#4A2E35', fontSize: 15, marginBottom: 4 }}>User: {selectedSOS.user_name}</Text>
+                  <Text style={{ color: '#4A2E35', fontSize: 15, marginBottom: 4 }}>Phone: {selectedSOS.user_phone}</Text>
+                  <Text style={{ color: '#9E7A80', fontSize: 13, marginBottom: 16 }}>{formatDistance(selectedSOS.distance_km)} away</Text>
+
+                  {selectedSOS.responder_id ? (
+                    <Text style={{ color: '#1F7A4E', fontWeight: '700', marginBottom: 16 }}>
+                      {selectedSOS.responder_id === user?.phone ? 'You are responding to this SOS.' : `${selectedSOS.responder_name} is already responding.`}
+                    </Text>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={handleRespondToSOS}
+                      disabled={respondingSOS}
+                      style={{ backgroundColor: '#D81B60', borderRadius: 20, paddingVertical: 14, alignItems: 'center', marginBottom: 12 }}
+                    >
+                      <Text style={{ color: 'white', fontWeight: '900' }}>{respondingSOS ? 'Responding...' : 'I Can Help / Respond'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+              <TouchableOpacity onPress={() => setSelectedSOS(null)}>
+                <Text style={{ color: '#9E7A80', textAlign: 'center', fontWeight: '700' }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {nearbySOS.length > 0 && (
+          <TouchableOpacity
+            onPress={() => setSelectedSOS(nearbySOS[0])}
+            activeOpacity={0.85}
+            style={{ backgroundColor: '#D81B60', borderRadius: 24, padding: 16, marginBottom: 16, borderWidth: 2, borderColor: '#FF1744' }}
+          >
+            <Text style={{ color: 'white', fontWeight: '900', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>
+              🚨 Community Emergency Alert
+            </Text>
+            <Text style={{ color: 'white', fontWeight: '700', marginTop: 4 }}>
+              SOS {formatDistance(nearbySOS[0].distance_km)} away! User: {nearbySOS[0].user_name} (Phone: {nearbySOS[0].user_phone})
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {renderSelectedReport()}
 
         {/* Live Safety Map Card */}
@@ -384,6 +516,7 @@ export default function HomeScreen() {
              </View>
            ) : (
              <MapView
+               ref={mapRef}
                provider={PROVIDER_GOOGLE}
                className="flex-1"
                initialRegion={{
@@ -421,6 +554,26 @@ export default function HomeScreen() {
                    onPress={() => setSelectedReport(report)}
                  />
                ))}
+
+               {nearbySOS.map((sos) => (
+                 <Marker
+                   key={`sos-${sos.id}`}
+                   coordinate={{ latitude: sos.latitude, longitude: sos.longitude }}
+                   onPress={() => setSelectedSOS(sos)}
+                   tracksViewChanges={true}
+                 >
+                   <PulsingSOSMarker />
+                 </Marker>
+               ))}
+
+               {responderRoute && (
+                 <Polyline
+                   coordinates={responderRoute}
+                   strokeWidth={5}
+                   strokeColor="#2979FF"
+                   zIndex={3}
+                 />
+               )}
 
                {location && <Marker coordinate={location.coords} pinColor="#000000" />}
              </MapView>
