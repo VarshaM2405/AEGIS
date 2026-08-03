@@ -1,11 +1,11 @@
-import React, { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert, Modal, Switch, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Search, Send, Shield, MapPin, AlertTriangle, Bell, Layers } from 'lucide-react-native';
-import { MapView, Circle, Marker, PROVIDER_GOOGLE } from '../components/MapViewWrapper';
+import { MapView, Circle, Marker, Polyline, PROVIDER_GOOGLE } from '../components/MapViewWrapper';
 
 const { width } = Dimensions.get('window');
 import { API_BASE_URL } from '../config';
@@ -40,6 +40,8 @@ export default function HomeScreen() {
   const [selectedSOS, setSelectedSOS] = useState(null);
   const [respondingSOS, setRespondingSOS] = useState(false);
   const [activeStatusMessage, setActiveStatusMessage] = useState('No active alerts nearby');
+  const [responderRoute, setResponderRoute] = useState(null);
+  const mapRef = useRef(null);
 
   const [refreshInterval, setRefreshInterval] = useState(null);
 
@@ -252,6 +254,38 @@ export default function HomeScreen() {
       Alert.alert('Unable to respond', result.error);
     }
   };
+
+  // The SOS (if any) that this device is the assigned responder for, derived
+  // straight from the live-polled nearbySOS list so it always reflects the
+  // current backend state (e.g. clears itself if the victim cancels).
+  const myActiveResponse = nearbySOS.find((sos) => sos.responder_id === user?.phone) || null;
+
+  useEffect(() => {
+    if (!myActiveResponse || !location?.coords) {
+      setResponderRoute(null);
+      return;
+    }
+    let cancelled = false;
+    const { latitude, longitude } = location.coords;
+    const url = `${API_BASE_URL}/api/routes?start_lat=${latitude}&start_lon=${longitude}&end_lat=${myActiveResponse.latitude}&end_lon=${myActiveResponse.longitude}`;
+    fetch(url)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const best = data.routes && data.routes[0];
+        if (!best) return;
+        const coords = best.geometry.coordinates.map((c) => ({ latitude: c[1], longitude: c[0] }));
+        setResponderRoute(coords);
+        if (mapRef.current) {
+          mapRef.current.fitToCoordinates(coords, {
+            edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
+            animated: true,
+          });
+        }
+      })
+      .catch((err) => console.error('Responder route fetch failed:', err));
+    return () => { cancelled = true; };
+  }, [myActiveResponse?.id]);
 
   const renderSelectedReport = () => {
     if (!selectedReport) return null;
@@ -482,6 +516,7 @@ export default function HomeScreen() {
              </View>
            ) : (
              <MapView
+               ref={mapRef}
                provider={PROVIDER_GOOGLE}
                className="flex-1"
                initialRegion={{
@@ -530,6 +565,15 @@ export default function HomeScreen() {
                    <PulsingSOSMarker />
                  </Marker>
                ))}
+
+               {responderRoute && (
+                 <Polyline
+                   coordinates={responderRoute}
+                   strokeWidth={5}
+                   strokeColor="#2979FF"
+                   zIndex={3}
+                 />
+               )}
 
                {location && <Marker coordinate={location.coords} pinColor="#000000" />}
              </MapView>

@@ -13,36 +13,40 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Map, ShieldAlert, Watch, User } from 'lucide-react-native';
 import { View, Text } from 'react-native';
 import SplashScreen from '../screens/SplashScreen';
+import GlobalSOSButton from '../components/GlobalSOSButton';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function MainTabs() {
   return (
-    <Tab.Navigator 
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarActiveTintColor: '#D81B60',
-        tabBarInactiveTintColor: '#DDA7A5',
-        tabBarLabelStyle: { fontFamily: 'Outfit_700Bold', fontSize: 11, marginTop: 2 },
-        tabBarStyle: { height: 90, paddingBottom: 30, paddingTop: 10, borderTopWidth: 0, elevation: 20, shadowColor: '#DDA7A5', shadowOpacity: 0.15, shadowRadius: 10 },
-        tabBarIcon: ({ color, size }) => {
-          let IconComp;
-          if (route.name === 'HomeTab') IconComp = Home;
-          else if (route.name === 'RouteTab') IconComp = Map;
-          else if (route.name === 'SOSTab') IconComp = ShieldAlert;
-          else if (route.name === 'WearableTab') IconComp = Watch;
-          else if (route.name === 'ProfileTab') IconComp = User;
-          return <IconComp size={size} color={color} />;
-        },
-      })}
-    >
-      <Tab.Screen name="HomeTab" component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
-      <Tab.Screen name="RouteTab" component={RoutePlanningScreen} options={{ tabBarLabel: 'Route' }} />
-      <Tab.Screen name="SOSTab" component={SOSScreen} options={{ tabBarLabel: 'SOS' }} />
-      <Tab.Screen name="WearableTab" component={WearableScreen} options={{ tabBarLabel: 'Sync' }} />
-      <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ tabBarLabel: 'Profile' }} />
-    </Tab.Navigator>
+    <View style={{ flex: 1 }}>
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarActiveTintColor: '#D81B60',
+          tabBarInactiveTintColor: '#DDA7A5',
+          tabBarLabelStyle: { fontFamily: 'Outfit_700Bold', fontSize: 11, marginTop: 2 },
+          tabBarStyle: { height: 90, paddingBottom: 30, paddingTop: 10, borderTopWidth: 0, elevation: 20, shadowColor: '#DDA7A5', shadowOpacity: 0.15, shadowRadius: 10 },
+          tabBarIcon: ({ color, size }) => {
+            let IconComp;
+            if (route.name === 'HomeTab') IconComp = Home;
+            else if (route.name === 'RouteTab') IconComp = Map;
+            else if (route.name === 'SOSTab') IconComp = ShieldAlert;
+            else if (route.name === 'WearableTab') IconComp = Watch;
+            else if (route.name === 'ProfileTab') IconComp = User;
+            return <IconComp size={size} color={color} />;
+          },
+        })}
+      >
+        <Tab.Screen name="HomeTab" component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
+        <Tab.Screen name="RouteTab" component={RoutePlanningScreen} options={{ tabBarLabel: 'Route' }} />
+        <Tab.Screen name="SOSTab" component={SOSScreen} options={{ tabBarLabel: 'SOS' }} />
+        <Tab.Screen name="WearableTab" component={WearableScreen} options={{ tabBarLabel: 'Sync' }} />
+        <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ tabBarLabel: 'Profile' }} />
+      </Tab.Navigator>
+      <GlobalSOSButton />
+    </View>
   );
 }
 

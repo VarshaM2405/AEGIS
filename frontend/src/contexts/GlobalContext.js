@@ -38,10 +38,11 @@ export const GlobalProvider = ({ children }) => {
     await AsyncStorage.setItem('@aegis_user', JSON.stringify(userData));
   };
 
-  const logout = async () => { 
-    setUser(null); 
-    setIsLoggedIn(false); 
-    await AsyncStorage.removeItem('@aegis_user');
+  const logout = async () => {
+    setUser(null);
+    setIsLoggedIn(false);
+    setUserProfile({ name: '', phone: '', emergencyContactName: '', emergencyContactPhone: '' });
+    await AsyncStorage.multiRemove(['@aegis_user', '@aegis_profile']);
   };
 
   useEffect(() => {
@@ -52,6 +53,10 @@ export const GlobalProvider = ({ children }) => {
           setUser(JSON.parse(storedUser));
           setIsLoggedIn(true);
         }
+        const storedProfile = await AsyncStorage.getItem('@aegis_profile');
+        if (storedProfile) {
+          setUserProfile(JSON.parse(storedProfile));
+        }
       } catch (e) {
         console.error("Failed to load user state", e);
       } finally {
@@ -60,6 +65,17 @@ export const GlobalProvider = ({ children }) => {
     };
     loadState();
   }, []);
+
+  // Persist userProfile (name/phone/emergency contact) so it survives app
+  // restarts — mirrors handleSetUser's AsyncStorage pattern above. Gated on
+  // isContextLoaded so this doesn't fire with the empty default state and
+  // clobber a previously-saved profile before loadState has restored it.
+  useEffect(() => {
+    if (!isContextLoaded) return;
+    AsyncStorage.setItem('@aegis_profile', JSON.stringify(userProfile)).catch((e) =>
+      console.error('Failed to persist user profile', e)
+    );
+  }, [userProfile, isContextLoaded]);
 
   const triggerSOS = async () => {
     if (!location) {

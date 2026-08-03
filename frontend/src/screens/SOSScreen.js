@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
-import { View, Text, TouchableOpacity, Animated, Dimensions, Linking, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Animated, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ShieldAlert, XCircle, PhoneCall, AlertTriangle, Users } from 'lucide-react-native';
+import * as SMS from 'expo-sms';
 
 const { width, height } = Dimensions.get('window');
 
@@ -17,16 +18,25 @@ export default function SOSScreen() {
   const { location, userProfile, activeSOS, triggerSOS, cancelSOS, sosError } = useContext(GlobalContext);
   const pulseAnim = new Animated.Value(1);
 
-  const sendEmergencySMS = () => {
+  const sendEmergencySMS = async () => {
     const phone = userProfile.emergencyContactPhone;
     if (!phone || !location) return;
     const mapsLink = `https://maps.google.com/?q=${location.coords.latitude},${location.coords.longitude}`;
     const message = `EMERGENCY! I need immediate help. My live location: ${mapsLink}`;
-    // iOS expects '&' before body, Android expects '?'
-    const separator = Platform.OS === 'ios' ? '&' : '?';
-    Linking.openURL(`sms:${phone}${separator}body=${encodeURIComponent(message)}`).catch((err) =>
-      console.error('Failed to open SMS composer:', err)
-    );
+    try {
+      // expo-sms targets the device's default SMS app directly (Android
+      // Intent.ACTION_SENDTO + "smsto:"), unlike Linking.openURL('sms:...')
+      // which fires a generic intent that WhatsApp/Truecaller also claim,
+      // forcing a chooser dialog on the user.
+      const available = await SMS.isAvailableAsync();
+      if (!available) {
+        console.error('SMS composer is not available on this device.');
+        return;
+      }
+      await SMS.sendSMSAsync([phone], message);
+    } catch (err) {
+      console.error('Failed to open SMS composer:', err);
+    }
   };
 
   const dispatchSOS = async () => {
@@ -35,7 +45,7 @@ export default function SOSScreen() {
     setDispatching(true);
     await triggerSOS();
     setDispatching(false);
-    sendEmergencySMS();
+    await sendEmergencySMS();
     setStatus('Alerting emergency contact & broadcasting your location!');
   };
 

@@ -55,12 +55,13 @@ export default function LoginScreen() {
       if (data.status === 'success') {
         if (data.user_exists) {
           setUser(data.user);
-          setUserProfile({
+          // Preserve any emergency contact already restored from storage —
+          // only name/phone come from this response, so don't blank the rest.
+          setUserProfile((prev) => ({
+            ...prev,
             name: data.user.name || '',
             phone: data.user.phone || '',
-            emergencyContactName: '',
-            emergencyContactPhone: '',
-          });
+          }));
           setIsLoggedIn(true);
           navigation.replace('Main');
         } else {

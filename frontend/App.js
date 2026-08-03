@@ -6,7 +6,6 @@ import { GlobalProvider } from './src/contexts/GlobalContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { useFonts, Cinzel_400Regular, Cinzel_700Bold } from '@expo-google-fonts/cinzel';
 import { Outfit_400Regular, Outfit_700Bold } from '@expo-google-fonts/outfit';
-// import GlobalSOSButton from './src/components/GlobalSOSButton';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
