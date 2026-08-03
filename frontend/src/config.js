@@ -4,6 +4,6 @@ const BACKEND_PORT = 8000;
 // laptop's IP changes (check with `ipconfig` on Windows / `ifconfig` on
 // mac/Linux) - a phone on the same Wi-Fi network needs this to reach the
 // backend; localhost only works for the emulator/simulator on the same machine.
-const MANUAL_IP = '192.168.0.101';
+const MANUAL_IP = 'YOUR_IPv4_ADDRESS';
 
 export const API_BASE_URL = `http://${MANUAL_IP}:${BACKEND_PORT}`;
