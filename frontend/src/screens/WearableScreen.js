@@ -29,7 +29,7 @@ export default function WearableScreen() {
         <Text className="text-[#9E7A80] font-medium mb-10">Real-time health & safety monitoring</Text>
 
         {/* Device Connectivity Card */}
-        <View className="bg-white p-6 rounded-[32px] shadow-sm border border-[#E5B2B9]50 flex-row items-center justify-between mb-8">
+        <View className="bg-white p-6 rounded-[32px] shadow-sm border border-[#E5B2B9]/50 flex-row items-center justify-between mb-8">
           <View className="flex-row items-center">
             <View className="bg-[#E5B2B920] p-4 rounded-2xl mr-4">
               <Watch size={28} color="#E5B2B9" />
@@ -49,7 +49,7 @@ export default function WearableScreen() {
         <View className="items-center justify-center py-10">
           <Animated.View 
             style={{ transform: [{ scale: pulseAnim }] }}
-            className="w-64 h-64 rounded-full bg-[#E5B2B910] items-center justify-center border border-[#E5B2B9]20"
+            className="w-64 h-64 rounded-full bg-[#E5B2B910] items-center justify-center border border-[#E5B2B9]/20"
           >
             <View className="w-48 h-48 rounded-full bg-white shadow-xl items-center justify-center">
               <LinearGradient
@@ -58,19 +58,19 @@ export default function WearableScreen() {
               />
               <Heart size={40} color="#D81B60" fill="#D81B60" />
               <Text className="text-5xl font-black text-[#4A2E35] mt-2">{bpm}</Text>
-              <Text className="text-[#9E7A80] font-bold text-xs uppercase tracking-widest">BPM</Text>
+              <Text style={{ letterSpacing: 2 }} className="text-[#9E7A80] font-bold text-xs uppercase">BPM</Text>
             </View>
           </Animated.View>
         </View>
 
         {/* Stats Grid */}
         <View className="flex-row space-x-4 mb-8">
-          <View className="flex-1 bg-white p-6 rounded-3xl shadow-sm border border-[#E5B2B9]50 items-center">
+          <View className="flex-1 bg-white p-6 rounded-3xl shadow-sm border border-[#E5B2B9]/50 items-center">
             <ShieldCheck size={28} color="#34C759" className="mb-3" />
             <Text className="text-xs text-[#9E7A80] font-bold uppercase mb-1">Status</Text>
             <Text className="font-bold text-[#4A2E35]">Protected</Text>
           </View>
-          <View className="flex-1 bg-white p-6 rounded-3xl shadow-sm border border-[#E5B2B9]50 items-center">
+          <View className="flex-1 bg-white p-6 rounded-3xl shadow-sm border border-[#E5B2B9]/50 items-center">
             <Zap size={28} color="#FFCC00" className="mb-3" />
             <Text className="text-xs text-[#9E7A80] font-bold uppercase mb-1">Activity</Text>
             <Text className="font-bold text-[#4A2E35]">Steady</Text>

@@ -1,10 +1,11 @@
 import React, { useState, useContext, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator, Switch, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ArrowLeft, Send, MapPin, AlertTriangle, Camera, FileText } from 'lucide-react-native';
+import { ArrowLeft, Send, MapPin, AlertTriangle, Camera } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { MapView, Marker, PROVIDER_GOOGLE } from '../components/MapViewWrapper';
 import { API_BASE_URL } from '../config';
 
@@ -29,6 +30,7 @@ export default function ReportScreen() {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [useCurrentLocation, setUseCurrentLocation] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [photos, setPhotos] = useState([]);
 
   useEffect(() => {
     if (location && useCurrentLocation) {
@@ -46,6 +48,68 @@ export default function ReportScreen() {
       setLongitude(String(selectedLocation.longitude));
     }
   }, [selectedLocation, useCurrentLocation]);
+
+  const requestPermissions = async (camera = false) => {
+    if (camera) {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Camera access is needed to take photos.');
+        return false;
+      }
+    }
+
+    const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (libraryStatus !== 'granted') {
+      Alert.alert('Permission required', 'Photo library access is needed to choose images.');
+      return false;
+    }
+
+    return true;
+  };
+
+  const pickPhoto = async () => {
+    const granted = await requestPermissions(false);
+    if (!granted) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets?.length > 0) {
+      const asset = result.assets[0];
+      const uri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+      setPhotos((prev) => [...prev, uri]);
+    }
+  };
+
+  const takePhoto = async () => {
+    const granted = await requestPermissions(true);
+    if (!granted) return;
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets?.length > 0) {
+      const asset = result.assets[0];
+      const uri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+      setPhotos((prev) => [...prev, uri]);
+    }
+  };
+
+  const handleAddPhoto = () => {
+    Alert.alert('Add Photo', 'Choose a photo from your library or take a new one.', [
+      { text: 'Take Photo', onPress: takePhoto },
+      { text: 'Choose from Library', onPress: pickPhoto },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
 
   const submitReport = async () => {
     if (!selectedType || !description.trim()) {
@@ -69,7 +133,8 @@ export default function ReportScreen() {
         longitude: lon,
         timestamp: new Date().toISOString(),
         userId: user?.phone || 'anonymous',
-        status: 'pending'
+        status: 'pending',
+        photos,
       };
 
       const response = await fetch(`${API_BASE_URL}/api/reports`, {
@@ -84,8 +149,7 @@ export default function ReportScreen() {
 
       if (response.ok) {
         const notification = {
-          id: (responseData.report_id && responseData.report_id.toString()) || String(Date.now()),
-          ...reportData
+        id: typeof responseData.report_id !== 'undefined' ? responseData.report_id : Date.now(),
         };
         addNotification(notification);
 
@@ -119,7 +183,7 @@ export default function ReportScreen() {
         </View>
 
         {/* Location Selector */}
-        <View className="bg-white p-4 rounded-2xl shadow-sm border border-[#E5B2B9]50 mb-6">
+        <View className="bg-white p-4 rounded-2xl shadow-sm border border-[#E5B2B9]/50 mb-6">
           <View className="flex-row items-center justify-between mb-4">
             <View className="flex-row items-center">
               <MapPin size={18} color="#D81B60" />
@@ -137,9 +201,9 @@ export default function ReportScreen() {
           </View>
 
           <View className="mb-3">
-            <Text className="text-[#4A2E35] text-xs uppercase tracking-widest mb-2">Latitude</Text>
+            <Text style={{ letterSpacing: 2 }} className="text-[#4A2E35] text-xs uppercase mb-2">Latitude</Text>
             <TextInput
-              className="bg-[#FAF5F5] p-3 rounded-2xl border border-[#E5B2B9]50 text-[#4A2E35]"
+              className="bg-[#FAF5F5] p-3 rounded-2xl border border-[#E5B2B9]/50 text-[#4A2E35]"
               value={latitude}
               onChangeText={(value) => {
                 setLatitude(value);
@@ -152,9 +216,9 @@ export default function ReportScreen() {
             />
           </View>
           <View>
-            <Text className="text-[#4A2E35] text-xs uppercase tracking-widest mb-2">Longitude</Text>
+            <Text style={{ letterSpacing: 2 }} className="text-[#4A2E35] text-xs uppercase mb-2">Longitude</Text>
             <TextInput
-              className="bg-[#FAF5F5] p-3 rounded-2xl border border-[#E5B2B9]50 text-[#4A2E35]"
+              className="bg-[#FAF5F5] p-3 rounded-2xl border border-[#E5B2B9]/50 text-[#4A2E35]"
               value={longitude}
               onChangeText={(value) => {
                 setLongitude(value);
@@ -168,8 +232,8 @@ export default function ReportScreen() {
           </View>
         </View>
 
-        <View className="bg-white rounded-3xl overflow-hidden shadow-sm border border-[#E5B2B9]50 mb-6">
-          <View className="px-4 py-3 border-b border-[#E5B2B9]50">
+        <View className="bg-white rounded-3xl overflow-hidden shadow-sm border border-[#E5B2B9]/50 mb-6">
+          <View className="px-4 py-3 border-b border-[#E5B2B9]/50">
             <Text className="text-[#4A2E35] font-bold">Tap the map to place the report pin</Text>
             <Text className="text-[#9E7A80] text-xs mt-1">Use current location or choose another spot manually.</Text>
           </View>
@@ -212,7 +276,7 @@ export default function ReportScreen() {
                 className={`mr-2 mb-2 px-4 py-2 rounded-full border ${
                   selectedType === type 
                     ? 'bg-[#D81B60] border-[#D81B60]' 
-                    : 'bg-white border-[#E5B2B9]50'
+                    : 'bg-white border-[#E5B2B9]/50'
                 }`}
               >
                 <Text className={`text-sm font-medium ${
@@ -229,7 +293,7 @@ export default function ReportScreen() {
         <View className="mb-6">
           <Text className="text-[#4A2E35] font-bold text-lg mb-3">Description</Text>
           <TextInput
-            className="bg-white p-4 rounded-2xl shadow-sm border border-[#E5B2B9]50 text-[#4A2E35] min-h-[120px]"
+            className="bg-white p-4 rounded-2xl shadow-sm border border-[#E5B2B9]/50 text-[#4A2E35] min-h-[120px]"
             placeholder="Describe what happened..."
             placeholderTextColor="#9E7A80"
             multiline
@@ -240,16 +304,30 @@ export default function ReportScreen() {
         </View>
 
         {/* Additional Options */}
-        <View className="flex-row justify-between mb-8">
-          <TouchableOpacity className="flex-1 bg-white p-4 rounded-2xl shadow-sm border border-[#E5B2B9]50 items-center mr-2">
+        <View className="mb-6">
+          <Text className="text-[#4A2E35] font-bold text-lg mb-3">Photos (optional)</Text>
+          <TouchableOpacity
+            onPress={handleAddPhoto}
+            className="bg-white p-4 rounded-2xl shadow-sm border border-[#E5B2B9]/50 items-center"
+          >
             <Camera size={24} color="#D81B60" />
             <Text className="text-[#4A2E35] font-medium text-sm mt-2">Add Photo</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity className="flex-1 bg-white p-4 rounded-2xl shadow-sm border border-[#E5B2B9]50 items-center ml-2">
-            <FileText size={24} color="#D81B60" />
-            <Text className="text-[#4A2E35] font-medium text-sm mt-2">Add Details</Text>
-          </TouchableOpacity>
+
+          {photos.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-4">
+              {photos.map((uri, index) => (
+                <Image
+                  key={`${uri}-${index}`}
+                  source={{ uri }}
+                  className="w-28 h-28 rounded-3xl mr-3"
+                  resizeMode="cover"
+                />
+              ))}
+            </ScrollView>
+          ) : (
+            <Text className="text-[#9E7A80] text-sm mt-3">You can attach photos from your camera or gallery.</Text>
+          )}
         </View>
 
         {/* Submit Button */}

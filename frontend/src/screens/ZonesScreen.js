@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Linking, Share, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Dimensions, Linking, Share, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Phone, Share2, Shield } from 'lucide-react-native';
+import QRCode from 'react-native-qrcode-svg';
+import { EXPO_DEV_URL } from '../config';
 
 const { width } = Dimensions.get('window');
 
@@ -12,6 +14,7 @@ export default function ZonesScreen() {
   const { location } = useContext(GlobalContext);
   const navigation = useNavigation();
   const [activeStatusMessage, setActiveStatusMessage] = useState('Emergency services ready');
+  const [qrValue, setQrValue] = useState('');
   const soundRef = useRef(null);
 
   useEffect(() => {
@@ -35,9 +38,12 @@ export default function ZonesScreen() {
     }
     const { latitude, longitude } = location.coords;
     const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    const expoGoUrl = `${EXPO_DEV_URL}?location=${encodeURIComponent(googleMapsUrl)}`;
+    const shareText = `My current location: ${googleMapsUrl}`;
+    setQrValue(expoGoUrl);
     try {
       await Share.share({
-        message: `My current location: ${googleMapsUrl}`,
+        message: shareText,
       });
     } catch (error) {
       Alert.alert('Error', 'Could not share location');
@@ -107,13 +113,21 @@ export default function ZonesScreen() {
                   <Text className="text-white font-bold text-lg">SHARE CURRENT LOCATION</Text>
                 </LinearGradient>
               </TouchableOpacity>
+
+              {qrValue ? (
+                <View className="bg-white rounded-3xl p-4 border border-[#F5C6D1] items-center">
+                  <Text className="text-[#4A2E35] font-bold text-sm mb-3">Expo Go QR</Text>
+                  <QRCode value={qrValue} size={180} backgroundColor="white" color="#4A2E35" />
+                  <Text className="text-[#6B4A55] text-xs font-mono mt-3 text-center">{qrValue}</Text>
+                </View>
+              ) : null}
             </View>
           </LinearGradient>
         </View>
 
         {/* Safety Status Card */}
         <View className="px-6 pb-6">
-          <View className="bg-[#FDF2F7] p-4 rounded-3xl shadow-sm border border-[#F5C6D1]50">
+          <View className="bg-[#FDF2F7] p-4 rounded-3xl shadow-sm border border-[#F5C6D1]/50">
             <Text className="text-[#4A2E35] font-bold text-lg mb-3">Safety Status</Text>
             <View className="bg-white rounded-3xl p-4 border border-[#F5C6D1]">
               <Text className="text-[#4A2E35] text-sm">{activeStatusMessage}</Text>

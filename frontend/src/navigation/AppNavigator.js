@@ -13,10 +13,12 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Map, ShieldAlert, Watch, User } from 'lucide-react-native';
 import { View, Text } from 'react-native';
 import SplashScreen from '../screens/SplashScreen';
-import GlobalSOSButton from '../components/GlobalSOSButton';
+import { TouchableOpacity } from 'react-native';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+
+const EmptyScreen = () => null;
 
 function MainTabs() {
   return (
@@ -41,11 +43,57 @@ function MainTabs() {
       >
         <Tab.Screen name="HomeTab" component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
         <Tab.Screen name="RouteTab" component={RoutePlanningScreen} options={{ tabBarLabel: 'Route' }} />
-        <Tab.Screen name="SOSTab" component={SOSScreen} options={{ tabBarLabel: 'SOS' }} />
+        <Tab.Screen
+          name="SOSTab"
+          component={EmptyScreen}
+          listeners={({ navigation }) => ({
+            tabPress: (e) => {
+              e.preventDefault();
+              // open the modal on the parent stack to match Home's SOS button
+              navigation.getParent()?.navigate('SOSModal');
+            },
+          })}
+          options={{
+            tabBarLabel: 'SOS',
+            tabBarLabelStyle: { fontSize: 13, fontWeight: '800', color: '#8c1a2b' },
+            tabBarButton: (props) => {
+              const focused = props.accessibilityState?.selected;
+              return (
+                <TouchableOpacity
+                  {...props}
+                  activeOpacity={0.85}
+                  style={{
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    top: 6,
+                    flex: 1,
+                  }}
+                >
+                  <View style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 32,
+                    backgroundColor: '#ff3b30',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 6 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 8,
+                    elevation: 12,
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                  }}>
+                    <Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }}>SOS</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            }
+          }}
+        />
         <Tab.Screen name="WearableTab" component={WearableScreen} options={{ tabBarLabel: 'Sync' }} />
         <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ tabBarLabel: 'Profile' }} />
       </Tab.Navigator>
-      <GlobalSOSButton />
     </View>
   );
 }

@@ -9,6 +9,15 @@ import * as SMS from 'expo-sms';
 
 const { width, height } = Dimensions.get('window');
 
+const extractGuardianPhones = (nearbyGuardians = []) => {
+  return nearbyGuardians
+    .map((guardian) => {
+      const match = guardian.match(/\(([^)]+)\)$/);
+      return match ? match[1].trim() : null;
+    })
+    .filter(Boolean);
+};
+
 export default function SOSScreen() {
   const [countdown, setCountdown] = useState(15);
   const [status, setStatus] = useState('Holding...');
@@ -18,22 +27,28 @@ export default function SOSScreen() {
   const { location, userProfile, activeSOS, triggerSOS, cancelSOS, sosError } = useContext(GlobalContext);
   const pulseAnim = new Animated.Value(1);
 
-  const sendEmergencySMS = async () => {
-    const phone = userProfile.emergencyContactPhone;
-    if (!phone || !location) return;
+  const sendEmergencySMS = async (sosData) => {
+    if (!location) return;
     const mapsLink = `https://maps.google.com/?q=${location.coords.latitude},${location.coords.longitude}`;
-    const message = `EMERGENCY! I need immediate help. My live location: ${mapsLink}`;
+    let message = `EMERGENCY! I need immediate help. My live location: ${mapsLink}`;
+
+    const emergencyPhone = userProfile.emergencyContactPhone;
+    const guardianPhones = extractGuardianPhones(sosData?.nearby_guardians);
+    const recipients = Array.from(new Set([emergencyPhone, ...guardianPhones].filter(Boolean)));
+
+    if (!recipients.length) return;
+
+    if (sosData?.nearby_guardians?.length) {
+      message += ` Nearby guardians: ${sosData.nearby_guardians.join('; ')}.`;
+    }
+
     try {
-      // expo-sms targets the device's default SMS app directly (Android
-      // Intent.ACTION_SENDTO + "smsto:"), unlike Linking.openURL('sms:...')
-      // which fires a generic intent that WhatsApp/Truecaller also claim,
-      // forcing a chooser dialog on the user.
       const available = await SMS.isAvailableAsync();
       if (!available) {
         console.error('SMS composer is not available on this device.');
         return;
       }
-      await SMS.sendSMSAsync([phone], message);
+      await SMS.sendSMSAsync(recipients, message);
     } catch (err) {
       console.error('Failed to open SMS composer:', err);
     }
@@ -43,9 +58,9 @@ export default function SOSScreen() {
     if (hasTriggered.current) return;
     hasTriggered.current = true;
     setDispatching(true);
-    await triggerSOS();
+    const sosResponse = await triggerSOS();
     setDispatching(false);
-    await sendEmergencySMS();
+    await sendEmergencySMS(sosResponse);
     setStatus('Alerting emergency contact & broadcasting your location!');
   };
 
@@ -83,7 +98,7 @@ export default function SOSScreen() {
 
         {/* Header */}
         <View className="items-center">
-           <Text className="text-white text-3xl font-black tracking-widest uppercase italic">Emergency SOS</Text>
+           <Text style={{ letterSpacing: 2 }} className="text-white text-3xl font-black uppercase italic">Emergency SOS</Text>
            <Text className="text-white/80 font-bold mt-2">Help is on the way</Text>
         </View>
 
@@ -103,18 +118,18 @@ export default function SOSScreen() {
         <View className="items-center w-full">
            <Text className="text-white text-xl font-bold text-center mb-4">{dispatching ? 'Dispatching...' : status}</Text>
 
-           <View className="flex-row space-x-4 mb-8">
-              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1">
+           <View className="flex-row space-x-3 mb-8">
+              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1" style={{ minWidth: 88 }}>
                  <ShieldAlert size={28} color="white" />
-                 <Text className="text-white text-xs font-bold mt-2">Authorities</Text>
+                 <Text numberOfLines={1} style={{ textAlign: 'center' }} className="text-white text-xs font-bold mt-2">Authorities</Text>
               </View>
-              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1 border border-white/40">
+              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1 border border-white/40" style={{ minWidth: 88 }}>
                  <Users size={28} color="white" />
-                 <Text className="text-white text-xs font-bold mt-2">Community</Text>
+                 <Text numberOfLines={1} style={{ textAlign: 'center' }} className="text-white text-xs font-bold mt-2">Community</Text>
               </View>
-              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1">
+              <View className="bg-white/20 p-3 rounded-2xl items-center flex-1" style={{ minWidth: 88 }}>
                  <PhoneCall size={28} color="white" />
-                 <Text className="text-white text-xs font-bold mt-2">Contacts</Text>
+                 <Text numberOfLines={1} style={{ textAlign: 'center' }} className="text-white text-xs font-bold mt-2">Contacts</Text>
               </View>
            </View>
 

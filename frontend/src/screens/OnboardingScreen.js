@@ -4,13 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Shield, MapPin, Users, ArrowRight } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
-import { styled } from 'nativewind';
 
 const { width } = Dimensions.get('window');
 
-const StyledView = styled(View);
-const StyledText = styled(Text);
-const StyledTouchableOpacity = styled(TouchableOpacity);
+const StyledView = View;
+const StyledText = Text;
+const StyledTouchableOpacity = TouchableOpacity;
 
 const ONBOARDING_DATA = [
   {
@@ -58,7 +57,7 @@ export default function OnboardingScreen() {
         
         {/* Header Section */}
         <View className="items-center">
-          <StyledText className="text-3xl font-extrabold text-[#D81B60] tracking-widest">AEGIS</StyledText>
+          <StyledText style={{ letterSpacing: 2 }} className="text-3xl font-extrabold text-[#D81B60]">AEGIS</StyledText>
           <StyledText className="text-sm text-gray-500 font-medium mt-1">Adaptive Safety Navigation</StyledText>
         </View>
 

@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+import json
 import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,10 +14,11 @@ import numpy as np
 import requests
 import random
 from scipy.spatial import cKDTree
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import math
+from auth_utils import normalize_phone_for_sms
 
 app = FastAPI(title="AEGIS API")
 
@@ -28,6 +30,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Ensure the incident_reports table has a photos column for report attachments.
+try:
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE incident_reports ADD COLUMN IF NOT EXISTS photos TEXT"))
+except Exception as e:
+    print(f"Could not ensure photos column exists: {e}")
 
 # Load pre-trained Random Forest ML Model for Routing Safety
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "aegis_safety_v2.pkl")
@@ -48,6 +57,7 @@ else:
 # Pydantic Schemas for Auth
 class PhoneRequest(BaseModel):
     phone: str
+    name: str | None = None
 
 class VerifyRequest(BaseModel):
     phone: str
@@ -68,10 +78,34 @@ class ReportRequest(BaseModel):
     timestamp: str
     userId: str = None
     status: str = "pending"
+    photos: list[str] = []
+
+class VolunteerRegisterRequest(BaseModel):
+    name: str
+    phone: str
+    location_name: str
+    latitude: float
+    longitude: float
+    availability: str
+    radius: float = 2.0
+    language: str | None = None
+    training: bool = False
 
 class ReportRespondRequest(BaseModel):
     userId: str
     action: str
+
+class VolunteerRegisterRequest(BaseModel):
+    name: str
+    phone: str
+    location_name: str
+    latitude: float
+    longitude: float
+    availability: str
+    radius: float | str
+    language: str | None = None
+    training: bool | None = False
+
 
 
 def get_user_info(db, phone: str):
@@ -101,7 +135,11 @@ Base.metadata.create_all(bind=engine)
 def ensure_report_columns():
     db = SessionLocal()
     try:
-        db.execute(text("ALTER TABLE incident_reports ADD COLUMN IF NOT EXISTS responder_id VARCHAR"))
+        report_columns = [row[1] for row in db.execute(text("PRAGMA table_info(incident_reports)")).fetchall()]
+        if "responder_id" not in report_columns:
+            db.execute(text("ALTER TABLE incident_reports ADD COLUMN responder_id VARCHAR"))
+        if "photos" not in report_columns:
+            db.execute(text("ALTER TABLE incident_reports ADD COLUMN photos TEXT"))
         db.commit()
     except Exception as e:
         print(f"Error ensuring report columns: {e}")
@@ -113,10 +151,11 @@ def ensure_report_columns():
 def ensure_sos_columns():
     db = SessionLocal()
     try:
-        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_id VARCHAR"))
-        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_name VARCHAR"))
-        db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_phone VARCHAR"))
-        db.commit()
+        if not getattr(database, "IS_SQLITE", False):
+            db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_id VARCHAR"))
+            db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_name VARCHAR"))
+            db.execute(text("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS responder_phone VARCHAR"))
+            db.commit()
     except Exception as e:
         print(f"Error ensuring sos columns: {e}")
         db.rollback()
@@ -166,11 +205,60 @@ def load_csv_data():
 def health_check():
     return {"status": "ok", "app": "AEGIS API"}
 
+@app.post("/api/volunteers/register")
+def register_volunteer(req: VolunteerRegisterRequest, db=Depends(get_db)):
+    normalized_phone = normalize_phone_for_sms(req.phone)
+    
+    try:
+        radius_val = float(req.radius)
+    except ValueError:
+        radius_val = 2.0
+        
+    volunteer = db.query(models.Volunteer).filter(models.Volunteer.phone == normalized_phone).first()
+    if not volunteer:
+        volunteer = models.Volunteer(
+            name=req.name,
+            phone=normalized_phone,
+            location_name=req.location_name,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            availability=req.availability,
+            radius=radius_val,
+            language=req.language,
+            training=req.training
+        )
+        db.add(volunteer)
+    else:
+        volunteer.name = req.name
+        volunteer.location_name = req.location_name
+        volunteer.latitude = req.latitude
+        volunteer.longitude = req.longitude
+        volunteer.availability = req.availability
+        volunteer.radius = radius_val
+        volunteer.language = req.language
+        volunteer.training = req.training
+        
+    db.commit()
+    db.refresh(volunteer)
+    
+    return {
+        "status": "success",
+        "message": "Volunteer registered successfully",
+        "volunteer": {
+            "name": volunteer.name,
+            "phone": volunteer.phone,
+            "location_name": volunteer.location_name
+        }
+    }
+
+
 class SOSTriggerRequest(BaseModel):
     user_name: str
     user_phone: str
     latitude: float
     longitude: float
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
 
 class SOSResponse(BaseModel):
     id: int
@@ -184,6 +272,11 @@ class SOSResponse(BaseModel):
     responder_id: Optional[str] = None
     responder_name: Optional[str] = None
     responder_phone: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    sms_sent: Optional[bool] = None
+    sms_message: Optional[str] = None
+    nearby_guardians: Optional[list[str]] = None
 
     class Config:
         from_attributes = True
@@ -192,9 +285,71 @@ class SOSRespondRequest(BaseModel):
     responder_phone: str
     responder_name: str
 
+@app.post("/api/volunteers/register")
+def register_volunteer(payload: VolunteerRegisterRequest, db = Depends(get_db)):
+    """Create or update a volunteer record for community guardians."""
+    volunteer = db.query(models.Volunteer).filter(models.Volunteer.phone == payload.phone).first()
+    if volunteer is None:
+        volunteer = models.Volunteer(
+            name=payload.name,
+            phone=payload.phone,
+            location_name=payload.location_name,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            availability=payload.availability,
+            radius=payload.radius,
+            language=payload.language,
+            training=payload.training,
+        )
+        db.add(volunteer)
+    else:
+        volunteer.name = payload.name
+        volunteer.location_name = payload.location_name
+        volunteer.latitude = payload.latitude
+        volunteer.longitude = payload.longitude
+        volunteer.availability = payload.availability
+        volunteer.radius = payload.radius
+        volunteer.language = payload.language
+        volunteer.training = payload.training
+        volunteer.registered_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(volunteer)
+    return {
+        "id": volunteer.id,
+        "name": volunteer.name,
+        "phone": volunteer.phone,
+        "location_name": volunteer.location_name,
+        "latitude": volunteer.latitude,
+        "longitude": volunteer.longitude,
+        "availability": volunteer.availability,
+        "radius": volunteer.radius,
+        "language": volunteer.language,
+        "training": volunteer.training,
+        "registered_at": volunteer.registered_at,
+    }
+
+
+def get_ist_hour() -> int:
+    india_tz = timezone(timedelta(hours=5, minutes=30))
+    return datetime.now(india_tz).hour
+
+
+def availability_matches(availability: str, local_hour: int) -> bool:
+    if availability == "Always":
+        return True
+    if availability == "Mornings":
+        return 6 <= local_hour < 12
+    if availability == "Evenings":
+        return 12 <= local_hour < 21
+    if availability == "Nights":
+        return local_hour >= 21 or local_hour < 6
+    return False
+
+
 @app.post("/api/sos/trigger", response_model=SOSResponse)
 def trigger_sos(payload: SOSTriggerRequest, db = Depends(get_db)):
-    """Create an active SOS event for the triggering user."""
+    """Create an active SOS event for the triggering user and notify the emergency contact."""
     sos = models.SOSEvent(
         user_name=payload.user_name,
         user_phone=payload.user_phone,
@@ -205,7 +360,89 @@ def trigger_sos(payload: SOSTriggerRequest, db = Depends(get_db)):
     db.add(sos)
     db.commit()
     db.refresh(sos)
-    return sos
+
+    nearby_guardians = []
+    current_hour = get_ist_hour()
+    volunteers = db.query(models.Volunteer).all()
+    for volunteer in volunteers:
+        try:
+            distance_km = haversine_km(payload.latitude, payload.longitude, volunteer.latitude, volunteer.longitude)
+        except Exception:
+            continue
+        if distance_km <= (volunteer.radius or 2.0) and availability_matches(volunteer.availability, current_hour):
+            nearby_guardians.append(f"{volunteer.name} ({volunteer.phone})")
+
+    sms_sent = False
+    sms_message = None
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    twilio_phone = os.getenv("TWILIO_PHONE_NUMBER")
+
+    maps_link = f"https://maps.google.com/?q={payload.latitude},{payload.longitude}"
+    if payload.emergency_contact_phone:
+        normalized_contact_phone = normalize_phone_for_sms(payload.emergency_contact_phone)
+        sms_message = (
+            f"EMERGENCY! {payload.user_name} needs immediate help. "
+            f"Live location: {maps_link}."
+        )
+        if nearby_guardians:
+            guardian_text = "; ".join(nearby_guardians)
+            sms_message += f" Nearby guardians: {guardian_text}."
+
+        if account_sid and auth_token and twilio_phone:
+            try:
+                from twilio.rest import Client
+                client = Client(account_sid, auth_token)
+                client.messages.create(
+                    body=sms_message,
+                    from_=twilio_phone,
+                    to=normalized_contact_phone,
+                )
+                print(f"Emergency SMS successfully sent to: {normalized_contact_phone}")
+                sms_sent = True
+            except Exception as e:
+                print(f"Emergency SMS sending failed: {e}")
+
+    # Optional: notify nearby volunteers directly if Twilio credentials are available.
+    if nearby_guardians and account_sid and auth_token and twilio_phone:
+        try:
+            from twilio.rest import Client
+            client = Client(account_sid, auth_token)
+            volunteer_message = (
+                f"SOS alert near you. {payload.user_name} needs help at {maps_link}. "
+                f"If able, respond safely."
+            )
+            for volunteer in volunteers:
+                distance_km = haversine_km(payload.latitude, payload.longitude, volunteer.latitude, volunteer.longitude)
+                if distance_km <= (volunteer.radius or 2.0) and availability_matches(volunteer.availability, current_hour):
+                    target_phone = normalize_phone_for_sms(volunteer.phone)
+                    client.messages.create(
+                        body=volunteer_message,
+                        from_=twilio_phone,
+                        to=target_phone,
+                    )
+            print(f"Volunteer SMS alerts sent to {len(nearby_guardians)} nearby guardian(s)")
+        except Exception as e:
+            print(f"Volunteer notification attempt failed: {e}")
+
+    return {
+        "id": sos.id,
+        "user_name": sos.user_name,
+        "user_phone": sos.user_phone,
+        "latitude": sos.latitude,
+        "longitude": sos.longitude,
+        "status": sos.status,
+        "created_at": sos.created_at,
+        "cancelled_at": sos.cancelled_at,
+        "responder_id": sos.responder_id,
+        "responder_name": sos.responder_name,
+        "responder_phone": sos.responder_phone,
+        "emergency_contact_name": payload.emergency_contact_name,
+        "emergency_contact_phone": payload.emergency_contact_phone,
+        "sms_sent": sms_sent,
+        "sms_message": sms_message,
+        "nearby_guardians": nearby_guardians,
+    }
 
 @app.patch("/api/sos/{sos_id}/cancel", response_model=SOSResponse)
 def cancel_sos(sos_id: int, db = Depends(get_db)):
@@ -300,41 +537,86 @@ def send_otp(req: PhoneRequest, db=Depends(get_db)):
     otp_code = f"{random.randint(1000, 9999)}"
     expires_at = datetime.now() + timedelta(minutes=5)
     
+    normalized_phone = normalize_phone_for_sms(req.phone)
+
     # Update or create OTP record
-    existing_otp = db.query(models.UserOTP).filter(models.UserOTP.phone == req.phone).first()
+    existing_otp = db.query(models.UserOTP).filter(models.UserOTP.phone == normalized_phone).first()
     if existing_otp:
         existing_otp.otp_code = otp_code
         existing_otp.expires_at = expires_at
     else:
-        new_otp = models.UserOTP(phone=req.phone, otp_code=otp_code, expires_at=expires_at)
+        new_otp = models.UserOTP(phone=normalized_phone, otp_code=otp_code, expires_at=expires_at)
         db.add(new_otp)
     
     db.commit()
     
-    # SIMULATED SMS SENDING
+    # Try sending via Twilio if credentials exist
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    twilio_phone = os.getenv("TWILIO_PHONE_NUMBER")
+    
+    twilio_sent = False
+    if account_sid and auth_token and twilio_phone:
+        try:
+            from twilio.rest import Client
+            client = Client(account_sid, auth_token)
+            # Format phone number for E.164 (India default if country code missing)
+            clean_phone = normalize_phone_for_sms(req.phone)
+            to_phone = clean_phone
+            
+            client.messages.create(
+                body=f"YOUR AEGIS OTP IS: {otp_code}",
+                from_=twilio_phone,
+                to=to_phone
+            )
+            print(f"Twilio SMS successfully sent to: {to_phone}")
+            twilio_sent = True
+        except Exception as e:
+            print(f"Twilio sending failed: {e}")
+    
+    # Fallback/simulation log
     print("\n" + "="*40)
-    print(f"SMS SENT TO: {req.phone}")
+    print(f"SMS SENT TO: {normalized_phone}")
     print(f"YOUR AEGIS OTP IS: {otp_code}")
     print("="*40 + "\n")
     
-    return {"status": "sent", "message": "OTP log generated in backend terminal."}
+    if twilio_sent:
+        return {"status": "sent", "message": "OTP sent via Twilio.", "otp_code": otp_code}
+    return {"status": "sent", "message": "OTP shown on your phone screen.", "otp_code": otp_code}
 
 @app.post("/api/auth/verify-otp")
 def verify_otp(req: VerifyRequest, db=Depends(get_db)):
     """Verifies the 4-digit OTP and returns user status."""
-    otp_record = db.query(models.UserOTP).filter(
-        models.UserOTP.phone == req.phone,
-        models.UserOTP.otp_code == req.otp_code
-    ).first()
-    
-    if not otp_record or otp_record.expires_at < datetime.now():
+    # Normalize incoming phone so we match the stored OTP record format
+    normalized_phone = normalize_phone_for_sms(req.phone)
+
+    # Fetch the OTP record by phone first so we can compare trimmed values
+    otp_record = db.query(models.UserOTP).filter(models.UserOTP.phone == normalized_phone).first()
+
+    req_otp_raw = req.otp_code if req.otp_code is not None else ''
+    req_otp = str(req_otp_raw).strip()
+    db_otp_raw = getattr(otp_record, 'otp_code', None)
+    db_otp = str(db_otp_raw).strip() if db_otp_raw is not None else None
+
+    # Debug logging to help diagnose verification failures
+    print(f"[VERIFY_DEBUG] requested_phone={req.phone!r} normalized={normalized_phone!r} req_otp={req_otp!r} db_otp={db_otp!r} now={datetime.now()} otp_expires={getattr(otp_record, 'expires_at', None)}")
+
+    if not otp_record:
         return {"status": "failed", "message": "Invalid or expired OTP"}
-    
-    # Check if user exists
-    user = db.query(models.User).filter(models.User.phone == req.phone).first()
+
+    # Check expiry
+    if otp_record.expires_at is None or otp_record.expires_at < datetime.now():
+        return {"status": "failed", "message": "Invalid or expired OTP"}
+
+    # Compare trimmed OTPs
+    if db_otp is None or req_otp != db_otp:
+        return {"status": "failed", "message": "Invalid or expired OTP"}
+
+    # Check if user exists (use normalized phone for user records)
+    user = db.query(models.User).filter(models.User.phone == normalized_phone).first()
     if not user:
         # Create a skeleton user
-        user = models.User(phone=req.phone, is_verified=True)
+        user = models.User(phone=normalized_phone, is_verified=True)
         db.add(user)
     else:
         user.is_verified = True
@@ -352,24 +634,50 @@ def verify_otp(req: VerifyRequest, db=Depends(get_db)):
         }
     }
 
+
+@app.get("/api/auth/peek-otp")
+def peek_otp(phone: str, db=Depends(get_db)):
+    """DEV ONLY: Return the currently stored OTP for a phone (helps debugging)."""
+    normalized_phone = normalize_phone_for_sms(phone)
+    otp_record = db.query(models.UserOTP).filter(models.UserOTP.phone == normalized_phone).first()
+    if not otp_record:
+        return {"status": "empty"}
+    return {"status": "found", "phone": normalized_phone, "otp_code": otp_record.otp_code, "expires_at": otp_record.expires_at.isoformat()}
+
 @app.post("/api/auth/register")
 def register_user(req: RegisterRequest, db=Depends(get_db)):
     """Completes the user profile registration."""
-    user = db.query(models.User).filter(models.User.phone == req.phone).first()
+    normalized_phone = normalize_phone_for_sms(req.phone)
+    # Create or update the user record without requiring OTP verification.
+    user = db.query(models.User).filter(models.User.phone == normalized_phone).first()
     if not user:
-        return {"status": "error", "message": "User must verify phone first"}
-    
-    user.name = req.name
-    user.area = req.area
-    user.latitude = req.latitude
-    user.longitude = req.longitude
-    
-    # Set PostGIS geometry
-    geom_wkt = f"SRID=4326;POINT({req.longitude} {req.latitude})"
-    user.geom = geom_wkt
-    
+        user = models.User(
+            name=req.name,
+            phone=normalized_phone,
+            area=req.area,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            is_verified=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        user.name = req.name
+        user.area = req.area
+        user.latitude = req.latitude
+        user.longitude = req.longitude
+        user.is_verified = True
+
+    # Set PostGIS geometry (works for both SQLite placeholder and PostGIS)
+    try:
+        geom_wkt = f"SRID=4326;POINT({req.longitude} {req.latitude})"
+        user.geom = geom_wkt
+    except Exception:
+        pass
+
     db.commit()
-    return {"status": "success", "message": "Profile completed"}
+    return {"status": "success", "message": "Profile completed", "user": {"name": user.name, "phone": user.phone, "area": user.area}}
 
 @app.get("/api/crimes/heatmap")
 def get_heatmap_data(db = Depends(get_db)):
@@ -503,6 +811,7 @@ def submit_incident_report(req: ReportRequest, db=Depends(get_db)):
             longitude=req.longitude,
             user_id=req.userId,
             status=req.status,
+            photos=json.dumps(req.photos or []),
             geom=geom_wkt
         )
         
@@ -561,6 +870,7 @@ def respond_to_incident_report(report_id: int, req: ReportRespondRequest, db=Dep
             "user_id": report.user_id,
             "reporter": get_user_info(db, report.user_id),
             "responder": get_user_info(db, report.responder_id),
+            "photos": json.loads(report.photos) if report.photos else [],
         }
     }
 
@@ -582,6 +892,7 @@ def get_incident_reports(db=Depends(get_db)):
                 "user_id": r.user_id,
                 "reporter": get_user_info(db, r.user_id),
                 "responder": get_user_info(db, r.responder_id),
+                "photos": json.loads(r.photos) if r.photos else [],
                 "responder_status": "responding" if r.responder_id else "waiting"
             }
             for r in reports

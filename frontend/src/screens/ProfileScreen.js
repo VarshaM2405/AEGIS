@@ -47,7 +47,7 @@ export default function ProfileScreen() {
              </LinearGradient>
           </View>
           <Text className="text-2xl font-black text-[#4A2E35]">{user?.name || "The Explorer"}</Text>
-          <Text className="text-[#9E7A80] font-bold uppercase tracking-wider text-xs mt-1">{user?.area || "Bangalore, IN"}</Text>
+          <Text style={{ letterSpacing: 1 }} className="text-[#9E7A80] font-bold uppercase text-xs mt-1">{user?.area || "Bangalore, IN"}</Text>
         </View>
 
         {/* Actionable Stats */}
@@ -64,8 +64,8 @@ export default function ProfileScreen() {
         </View>
 
         {/* Section: Account & Safety */}
-        <Text className="text-[#9E7A80] font-bold uppercase tracking-widest text-xs mb-4 ml-2">Safety Configuration</Text>
-        <View className="bg-white rounded-[32px] shadow-sm border border-[#E5B2B9]50 overflow-hidden mb-8">
+        <Text style={{ letterSpacing: 2 }} className="text-[#9E7A80] font-bold uppercase text-xs mb-4 ml-2">Safety Configuration</Text>
+        <View className="bg-white rounded-[32px] shadow-sm border border-[#E5B2B9]/50 overflow-hidden mb-8">
           <TouchableOpacity onPress={openContactModal} className="flex-row items-center justify-between p-5 border-b border-gray-50">
             <View className="flex-row items-center flex-1">
               <View className="bg-blue-50 p-2 rounded-xl mr-4"><PhoneForwarded size={20} color="#007AFF" /></View>
@@ -118,7 +118,7 @@ export default function ProfileScreen() {
             </View>
             <Text className="text-[#9E7A80] text-xs mb-5">We'll text them your live location during an SOS.</Text>
 
-            <View className="bg-[#FDF8F9] h-16 rounded-2xl flex-row items-center px-5 border border-[#E5B2B9]50 mb-4">
+            <View className="bg-[#FDF8F9] h-16 rounded-2xl flex-row items-center px-5 border border-[#E5B2B9]/50 mb-4">
               <User size={20} color="#DDA7A5" />
               <TextInput
                 placeholder="Contact Name"
@@ -127,7 +127,7 @@ export default function ProfileScreen() {
                 onChangeText={setContactName}
               />
             </View>
-            <View className="bg-[#FDF8F9] h-16 rounded-2xl flex-row items-center px-5 border border-[#E5B2B9]50 mb-6">
+            <View className="bg-[#FDF8F9] h-16 rounded-2xl flex-row items-center px-5 border border-[#E5B2B9]/50 mb-6">
               <PhoneForwarded size={20} color="#DDA7A5" />
               <TextInput
                 placeholder="Contact Phone Number"

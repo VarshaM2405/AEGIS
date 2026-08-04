@@ -1,7 +1,6 @@
 import datetime
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime
-from geoalchemy2 import Geometry
-from database import Base
+from database import Base, get_geom_column
 
 class CrimeIncident(Base):
     __tablename__ = "crime_incidents"
@@ -11,8 +10,8 @@ class CrimeIncident(Base):
     latitude = Column(Float)
     longitude = Column(Float)
 
-    # PostGIS Geometry
-    geom = Column(Geometry(geometry_type='POINT', srid=4326))
+    # Geometry column that works with SQLite for local runs and PostGIS in production
+    geom = Column(get_geom_column())
 
 class SOSEvent(Base):
     __tablename__ = "sos_events"
@@ -39,7 +38,21 @@ class User(Base):
     is_verified = Column(Boolean, default=False)
     registered_at = Column(DateTime, default=datetime.datetime.utcnow)
     
-    geom = Column(Geometry(geometry_type='POINT', srid=4326), nullable=True)
+    geom = Column(get_geom_column(), nullable=True)
+
+class Volunteer(Base):
+    __tablename__ = "volunteers"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    phone = Column(String, unique=True, index=True, nullable=False)
+    location_name = Column(String, nullable=False)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    availability = Column(String, nullable=False)
+    radius = Column(Float, default=2.0)
+    language = Column(String, nullable=True)
+    training = Column(Boolean, default=False)
+    registered_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class UserOTP(Base):
     __tablename__ = "user_otps"
@@ -60,5 +73,6 @@ class IncidentReport(Base):
     responder_id = Column(String, nullable=True)
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    photos = Column(String, nullable=True)
     
-    geom = Column(Geometry(geometry_type='POINT', srid=4326), nullable=True)
+    geom = Column(get_geom_column(), nullable=True)

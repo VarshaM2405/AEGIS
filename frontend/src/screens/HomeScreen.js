@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert, Modal, Switch, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator, Alert, Modal, Switch, Animated, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
@@ -43,15 +43,19 @@ export default function HomeScreen() {
   const [responderRoute, setResponderRoute] = useState(null);
   const mapRef = useRef(null);
 
-  const [refreshInterval, setRefreshInterval] = useState(null);
+  const refreshIntervalRef = useRef(null);
 
   useEffect(() => {
     fetchHeatmap();
     fetchReports();
 
-    const interval = setInterval(fetchReports, 3000);
-    setRefreshInterval(interval);
-    return () => clearInterval(interval);
+    refreshIntervalRef.current = setInterval(fetchReports, 3000);
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current);
+        refreshIntervalRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -90,6 +94,18 @@ export default function HomeScreen() {
           ? `${activeResponderCount} active responder${activeResponderCount > 1 ? 's' : ''} nearby`
           : 'Emergency mode active'
       );
+
+      const activeReportIds = new Set(reports.map((report) => String(report.id)));
+      if (notifications.length > 0) {
+        notifications.forEach((notification) => {
+          if (!notification?.id) return;
+          const notificationId = String(notification.id);
+          if (!activeReportIds.has(notificationId) && (notification.type || notification.description || notification.status)) {
+            removeNotification(notification.id);
+            console.log('Removed stale notification for report id:', notificationId);
+          }
+        });
+      }
 
       setSelectedReport((prev) => {
         if (!prev) return prev;
@@ -137,8 +153,9 @@ export default function HomeScreen() {
     console.log('=== RESOLVING ALERT ===', selectedReport.id);
     
     // Pause auto-refresh to prevent alert from reappearing
-    if (refreshInterval) {
-      clearInterval(refreshInterval);
+    if (refreshIntervalRef.current) {
+      clearInterval(refreshIntervalRef.current);
+      refreshIntervalRef.current = null;
       console.log('Paused auto-refresh interval');
     }
     
@@ -172,16 +189,14 @@ export default function HomeScreen() {
         // Immediately fetch to sync with backend
         await fetchReports();
         // Restart refresh interval after successful resolution
-        const newInterval = setInterval(fetchReports, 3000);
-        setRefreshInterval(newInterval);
+        refreshIntervalRef.current = setInterval(fetchReports, 3000);
         console.log('Restarted auto-refresh interval');
       } else {
         // If API fails, refresh to revert
         await fetchReports();
         Alert.alert('Unable to resolve', data.message || 'Could not resolve this alert.');
         // Restart refresh interval
-        const newInterval = setInterval(fetchReports, 3000);
-        setRefreshInterval(newInterval);
+        refreshIntervalRef.current = setInterval(fetchReports, 3000);
       }
     } catch (err) {
       console.error('Resolve request failed', err);
@@ -189,8 +204,7 @@ export default function HomeScreen() {
       await fetchReports();
       Alert.alert('Connection Error', 'Could not update alert status.');
       // Restart refresh interval
-      const newInterval = setInterval(fetchReports, 3000);
-      setRefreshInterval(newInterval);
+      refreshIntervalRef.current = setInterval(fetchReports, 3000);
     } finally {
       setResponding(false);
     }
@@ -200,13 +214,15 @@ export default function HomeScreen() {
     const unique = {};
     [...notifications, ...reportAlerts].forEach((item) => {
       if (!item || !item.id) return;
-      // Filter out resolved reports
+      const itemId = String(item.id);
+
+      // Filter out resolved reports.
       if (item.status === 'resolved') {
         console.log('Filtering out resolved alert:', item.id, item.status);
         return;
       }
-      // Keep non-resolved items
-      unique[item.id] = item;
+
+      unique[itemId] = item;
     });
     const result = Object.values(unique);
     console.log('Merged alerts count:', result.length, 'Total notifications:', notifications.length, 'Total reportAlerts:', reportAlerts.length);
@@ -307,7 +323,7 @@ export default function HomeScreen() {
           : 'This alert is new and waiting for a nearby responder to claim it.';
 
     return (
-      <View className="bg-white rounded-[32px] shadow-sm border border-[#E5B2B9]50 mb-6 p-5">
+      <View className="bg-white rounded-[32px] shadow-sm border border-[#E5B2B9]/50 mb-6 p-5">
         <View className="flex-row justify-between items-start mb-4">
           <View className="flex-1 pr-3">
             <Text className="text-[#4A2E35] font-bold text-xl">Alert Details</Text>
@@ -319,7 +335,7 @@ export default function HomeScreen() {
         </View>
 
         <View className="bg-[#FDF2F7] rounded-3xl p-4 mb-4 border border-[#F5C6D1]">
-          <Text className="text-[#D81B60] font-black text-base uppercase tracking-widest mb-2">{selectedReport.type}</Text>
+          <Text style={{ letterSpacing: 2 }} className="text-[#D81B60] font-black text-base uppercase mb-2">{selectedReport.type}</Text>
           <Text className="text-[#4A2E35] font-medium text-sm">{selectedReport.description}</Text>
         </View>
 
@@ -344,6 +360,22 @@ export default function HomeScreen() {
             <Text className="text-[#4A2E35] text-sm">Name: {responder.name || responder.phone}</Text>
             <Text className="text-[#4A2E35] text-sm mt-1">Contact: {responder.phone}</Text>
             {responder.area ? <Text className="text-[#4A2E35] text-sm mt-1">Area: {responder.area}</Text> : null}
+          </View>
+        )}
+
+        {selectedReport.photos?.length > 0 && (
+          <View className="mb-4">
+            <Text className="text-[#4A2E35] font-semibold text-base mb-3">Attached Photos</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="space-x-3">
+              {selectedReport.photos.map((uri, index) => (
+                <Image
+                  key={`${selectedReport.id}-photo-${index}`}
+                  source={{ uri }}
+                  className="w-40 h-40 rounded-3xl"
+                  resizeMode="cover"
+                />
+              ))}
+            </ScrollView>
           </View>
         )}
 
@@ -401,7 +433,7 @@ export default function HomeScreen() {
           </View>
           <TouchableOpacity
             onPress={() => setNotificationModalVisible(true)}
-            className="bg-white p-3 rounded-2xl shadow-sm border border-[#E5B2B9]50"
+            className="bg-white p-3 rounded-2xl shadow-sm border border-[#E5B2B9]/50"
             style={{ position: 'relative' }}
           >
             <Bell size={24} color="#D81B60" />
@@ -508,7 +540,7 @@ export default function HomeScreen() {
         {renderSelectedReport()}
 
         {/* Live Safety Map Card */}
-        <View className="bg-white rounded-[32px] shadow-lg border border-[#E5B2B9]50 mb-8 overflow-hidden h-64">
+        <View className="bg-white rounded-[32px] shadow-lg border border-[#E5B2B9]/50 mb-8 overflow-hidden h-64">
            {loadingMap ? (
              <View className="flex-1 items-center justify-center">
                 <ActivityIndicator color="#D81B60" />
@@ -580,14 +612,14 @@ export default function HomeScreen() {
            )}
            <View className="absolute bottom-4 left-4 right-4 bg-white/90 p-3 rounded-2xl border border-white flex-row items-center shadow-sm">
               <Layers size={18} color="#D81B60" className="mr-2" />
-              <Text className="text-[#4A2E35] font-bold text-xs uppercase tracking-tight">Active Crime Heatmap • Bangalore</Text>
+              <Text style={{ letterSpacing: 0.5 }} className="text-[#4A2E35] font-bold text-xs uppercase">Active Crime Heatmap • Bangalore</Text>
            </View>
         </View>
 
         {/* Search Bar */}
         <TouchableOpacity 
           onPress={() => navigation.navigate('RouteTab')}
-          className="bg-white h-16 rounded-3xl flex-row items-center px-5 shadow-sm border border-[#E5B2B9]50 mb-8"
+          className="bg-white h-16 rounded-3xl flex-row items-center px-5 shadow-sm border border-[#E5B2B9]/50 mb-8"
         >
           <Search size={22} color="#DDA7A5" />
           <Text className="flex-1 ml-4 text-[#9E7A80] font-medium">Where do you want to go?</Text>
@@ -600,32 +632,32 @@ export default function HomeScreen() {
         <View className="flex-row justify-between mb-8">
           <TouchableOpacity 
             onPress={() => navigation.navigate('Report')}
-            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]30 items-center mr-2"
+            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]/30 items-center mr-2"
           >
             <View className="bg-[#D81B6015] p-4 rounded-full mb-3">
               <AlertTriangle size={24} color="#D81B60" />
             </View>
-            <Text className="text-[#4A2E35] font-bold text-xs uppercase tracking-tight">Report</Text>
+            <Text style={{ letterSpacing: 0.5 }} className="text-[#4A2E35] font-bold text-xs uppercase">Report</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
             onPress={() => navigation.navigate('SOSModal')}
-            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]30 items-center mx-2"
+            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]/30 items-center mx-2"
           >
             <View className="bg-[#C7158515] p-4 rounded-full mb-3">
               <Shield size={24} color="#C71585" />
             </View>
-            <Text className="text-[#4A2E35] font-bold text-xs uppercase tracking-tight">SOS</Text>
+            <Text style={{ letterSpacing: 0.5 }} className="text-[#4A2E35] font-bold text-xs uppercase">SOS</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
             onPress={() => navigation.navigate('Zones')}
-            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]30 items-center ml-2"
+            className="bg-white flex-1 p-5 rounded-[24px] shadow-sm border border-[#E5B2B9]/30 items-center ml-2"
           >
             <View className="bg-[#34C75915] p-4 rounded-full mb-3">
               <Shield size={24} color="#34C759" />
             </View>
-            <Text className="text-[#4A2E35] font-bold text-xs uppercase tracking-tight">Toolkit</Text>
+            <Text style={{ letterSpacing: 0.5 }} className="text-[#4A2E35] font-bold text-xs uppercase">Tools</Text>
           </TouchableOpacity>
         </View>
 
@@ -636,7 +668,7 @@ export default function HomeScreen() {
           className="p-6 rounded-[32px] shadow-xl mb-10 flex-row items-center justify-between"
         >
           <View className="flex-1 pr-6">
-            <Text className="text-white/80 font-bold text-xs uppercase tracking-widest mb-1">Network Status</Text>
+            <Text style={{ letterSpacing: 2 }} className="text-white/80 font-bold text-xs uppercase mb-1">Network Status</Text>
             <Text className="text-white text-2xl font-black mb-2">AEGIS Active</Text>
             <Text className="text-white/90 text-xs font-medium leading-5">
               Live spatial routing and crime prediction active in your current location.

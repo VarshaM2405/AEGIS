@@ -29,7 +29,10 @@ export const GlobalProvider = ({ children }) => {
 
   const toggleSOS = () => setIsSOSActive(!isSOSActive);
   const addNotification = (notification) => setNotifications((prev) => [notification, ...prev]);
-  const removeNotification = (id) => setNotifications((prev) => prev.filter((n) => n.id !== id));
+  const removeNotification = (id) => {
+    const normalizedId = id != null ? String(id) : id;
+    return setNotifications((prev) => prev.filter((n) => String(n.id) !== normalizedId));
+  };
   const clearNotifications = () => setNotifications([]);
   
   const handleSetUser = async (userData) => {
@@ -91,6 +94,8 @@ export const GlobalProvider = ({ children }) => {
           user_phone: userProfile.phone || 'Unknown',
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
+          emergency_contact_name: userProfile.emergencyContactName || null,
+          emergency_contact_phone: userProfile.emergencyContactPhone || null,
         }),
       });
       if (!response.ok) throw new Error('SOS trigger request failed');
