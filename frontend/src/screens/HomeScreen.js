@@ -21,14 +21,12 @@ function PulsingSOSMarker() {
     ).start();
   }, []);
   return (
-    <Animated.View style={{ transform: [{ scale: pulseAnim }], backgroundColor: '#FF1744', padding: 8, borderRadius: 20, borderWidth: 3, borderColor: 'white' }}>
-      <Text style={{ fontSize: 16 }}>🚨</Text>
-    </Animated.View>
+    <Animated.View style={{ transform: [{ scale: pulseAnim }], width: 24, height: 24, borderRadius: 12, backgroundColor: '#FF1744', borderWidth: 3, borderColor: 'white' }} />
   );
 }
 
 export default function HomeScreen() {
-  const { location, user, notifications, removeNotification, clearNotifications, nearbySOS, respondToSOS } = useContext(GlobalContext);
+  const { location, user, notifications, removeNotification, clearNotifications, nearbySOS, respondToSOS, normalizePhone } = useContext(GlobalContext);
   const navigation = useNavigation();
   const [heatmapData, setHeatmapData] = useState([]);
   const [reportAlerts, setReportAlerts] = useState([]);
@@ -274,7 +272,8 @@ export default function HomeScreen() {
   // The SOS (if any) that this device is the assigned responder for, derived
   // straight from the live-polled nearbySOS list so it always reflects the
   // current backend state (e.g. clears itself if the victim cancels).
-  const myActiveResponse = nearbySOS.find((sos) => sos.responder_id === user?.phone) || null;
+  const normalizedUserPhone = normalizePhone(user?.phone);
+  const myActiveResponse = nearbySOS.find((sos) => sos.responder_id === normalizedUserPhone) || null;
 
   useEffect(() => {
     if (!myActiveResponse || !location?.coords) {
@@ -493,7 +492,7 @@ export default function HomeScreen() {
         <Modal visible={!!selectedSOS} animationType="slide" transparent>
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }}>
             <View style={{ backgroundColor: '#fff', borderRadius: 30, padding: 24, borderWidth: 2, borderColor: '#FF1744' }}>
-              <Text style={{ fontSize: 20, fontWeight: '900', color: '#D81B60', marginBottom: 8 }}>🚨 Emergency SOS</Text>
+              <Text style={{ fontSize: 20, fontWeight: '900', color: '#D81B60', marginBottom: 8 }}>Emergency SOS</Text>
               {selectedSOS && (
                 <>
                   <Text style={{ color: '#4A2E35', fontSize: 15, marginBottom: 4 }}>User: {selectedSOS.user_name}</Text>
@@ -502,7 +501,7 @@ export default function HomeScreen() {
 
                   {selectedSOS.responder_id ? (
                     <Text style={{ color: '#1F7A4E', fontWeight: '700', marginBottom: 16 }}>
-                      {selectedSOS.responder_id === user?.phone ? 'You are responding to this SOS.' : `${selectedSOS.responder_name} is already responding.`}
+                      {selectedSOS.responder_id === normalizedUserPhone ? 'You are responding to this SOS.' : `${selectedSOS.responder_name} is already responding.`}
                     </Text>
                   ) : (
                     <TouchableOpacity
@@ -529,7 +528,7 @@ export default function HomeScreen() {
             style={{ backgroundColor: '#D81B60', borderRadius: 24, padding: 16, marginBottom: 16, borderWidth: 2, borderColor: '#FF1744' }}
           >
             <Text style={{ color: 'white', fontWeight: '900', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>
-              🚨 Community Emergency Alert
+              Community Emergency Alert
             </Text>
             <Text style={{ color: 'white', fontWeight: '700', marginTop: 4 }}>
               SOS {formatDistance(nearbySOS[0].distance_km)} away! User: {nearbySOS[0].user_name} (Phone: {nearbySOS[0].user_phone})
