@@ -90,9 +90,8 @@ export default function HomeScreen() {
           ? 'No active alerts nearby'
           : activeResponderCount > 0
           ? `${activeResponderCount} active responder${activeResponderCount > 1 ? 's' : ''} nearby`
-          : 'Emergency mode active'
+          : 'Alert response mode active'
       );
-
       const activeReportIds = new Set(reports.map((report) => String(report.id)));
       if (notifications.length > 0) {
         notifications.forEach((notification) => {
@@ -528,10 +527,10 @@ export default function HomeScreen() {
             style={{ backgroundColor: '#D81B60', borderRadius: 24, padding: 16, marginBottom: 16, borderWidth: 2, borderColor: '#FF1744' }}
           >
             <Text style={{ color: 'white', fontWeight: '900', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>
-              Community Emergency Alert
+              Nearby Assistance Alert
             </Text>
             <Text style={{ color: 'white', fontWeight: '700', marginTop: 4 }}>
-              SOS {formatDistance(nearbySOS[0].distance_km)} away! User: {nearbySOS[0].user_name} (Phone: {nearbySOS[0].user_phone})
+              Alert {formatDistance(nearbySOS[0].distance_km)} away. User: {nearbySOS[0].user_name} (Phone: {nearbySOS[0].user_phone})
             </Text>
           </TouchableOpacity>
         )}
