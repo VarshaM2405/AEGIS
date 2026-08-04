@@ -5,12 +5,12 @@ import LoginScreen from '../screens/LoginScreen';
 import HomeScreen from '../screens/HomeScreen';
 import SOSScreen from '../screens/SOSScreen';
 import RoutePlanningScreen from '../screens/RoutePlanningScreen';
-import WearableScreen from '../screens/WearableScreen';
+import SafetyScreen from '../screens/SafetyScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ReportScreen from '../screens/ReportScreen';
 import ZonesScreen from '../screens/ZonesScreen';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Home, Map, ShieldAlert, Watch, User } from 'lucide-react-native';
+import { Home, Map, ShieldAlert, Shield, User } from 'lucide-react-native';
 import { View, Text } from 'react-native';
 import SplashScreen from '../screens/SplashScreen';
 import { TouchableOpacity } from 'react-native';
@@ -35,7 +35,7 @@ function MainTabs() {
             if (route.name === 'HomeTab') IconComp = Home;
             else if (route.name === 'RouteTab') IconComp = Map;
             else if (route.name === 'SOSTab') IconComp = ShieldAlert;
-            else if (route.name === 'WearableTab') IconComp = Watch;
+            else if (route.name === 'SafetyTab') IconComp = Shield;
             else if (route.name === 'ProfileTab') IconComp = User;
             return <IconComp size={size} color={color} />;
           },
@@ -91,7 +91,7 @@ function MainTabs() {
             }
           }}
         />
-        <Tab.Screen name="WearableTab" component={WearableScreen} options={{ tabBarLabel: 'Sync' }} />
+        <Tab.Screen name="SafetyTab" component={SafetyScreen} options={{ tabBarLabel: 'Safety' }} />
         <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ tabBarLabel: 'Profile' }} />
       </Tab.Navigator>
     </View>

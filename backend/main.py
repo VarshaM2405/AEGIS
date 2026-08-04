@@ -128,6 +128,140 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     return 2 * R * math.asin(math.sqrt(a))
 
+
+def normalize_lonlat(value):
+    return float(value) if value is not None else 0.0
+
+
+def get_model_danger_score(lat: float, lon: float):
+    if not (safety_model and crime_tree and kmeans_model):
+        return None
+    try:
+        coords = np.array([[lat, lon]], dtype=float)
+        k = min(50, len(crime_tree.data)) if hasattr(crime_tree, 'data') else 1
+        k = max(1, k)
+        dists, _ = crime_tree.query(coords, k=k)
+        if dists.ndim == 1:
+            dists = dists.reshape(1, -1)
+        spatial_density = 1.0 / (np.mean(dists, axis=1) + 1e-6)
+        cluster_ids = kmeans_model.predict(coords)
+        hotspot_tree = cKDTree(kmeans_model.cluster_centers_)
+        h_dist, _ = hotspot_tree.query(coords, k=1)
+        X_inference = np.column_stack((coords, np.full((coords.shape[0], 1), datetime.now().hour), spatial_density, h_dist, cluster_ids))
+        predictions = safety_model.predict(X_inference)
+        return float(np.mean(predictions) + (np.max(predictions) * 0.4))
+    except Exception as e:
+        print(f"Model danger score failed: {e}")
+        return None
+
+
+def danger_to_safety_score(danger_score: float):
+    if danger_score is None:
+        return None
+    score = max(0.0, min(100.0, 100.0 - danger_score * 10.0))
+    return round(score, 1)
+
+
+def safety_level(score: float):
+    if score is None:
+        return 'Unknown'
+    if score >= 70:
+        return 'Safe'
+    if score >= 45:
+        return 'Moderate'
+    return 'High Risk'
+
+
+def reverse_geocode(lat: float, lon: float) -> str:
+    try:
+        url = 'https://nominatim.openstreetmap.org/reverse'
+        resp = requests.get(
+            url,
+            params={
+                'format': 'jsonv2',
+                'lat': lat,
+                'lon': lon,
+                'zoom': 16,
+                'addressdetails': 1,
+            },
+            headers={'User-Agent': 'AEGIS Safety Service/1.0'},
+            timeout=12,
+        )
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        address = payload.get('address', {})
+        place = address.get('neighbourhood') or address.get('suburb') or address.get('city_district') or address.get('village') or address.get('town') or address.get('city')
+        if place:
+            return place
+        return payload.get('display_name')
+    except Exception as e:
+        print(f"Reverse geocode failed: {e}")
+        return None
+
+
+def query_overpass_amenities(lat: float, lon: float, amenity: str, radius: int = 3000, limit: int = 3):
+    overpass_endpoints = [
+        'https://overpass.openstreetmap.fr/api/interpreter',
+        'https://overpass-api.de/api/interpreter',
+        'https://overpass.osm.ch/api/interpreter',
+    ]
+    query_filters = [
+        f'node["amenity"="{amenity}"](around:{radius},{lat},{lon})',
+        f'way["amenity"="{amenity}"](around:{radius},{lat},{lon})',
+        f'relation["amenity"="{amenity}"](around:{radius},{lat},{lon})',
+    ]
+    query = f"[out:json][timeout:15];({';'.join(query_filters)});out center tags;"
+    headers = {'User-Agent': 'AEGIS Safety Service/1.0'}
+
+    last_error = None
+    for overpass_url in overpass_endpoints:
+        try:
+            resp = requests.get(overpass_url, params={'data': query}, headers=headers, timeout=25)
+            resp.raise_for_status()
+            data = resp.json()
+            elements = data.get('elements', [])
+            if not elements:
+                last_error = f"Overpass {overpass_url} returned zero elements"
+                continue
+
+            results = []
+            for element in elements:
+                tags = element.get('tags', {})
+                name = tags.get('name') or tags.get('operator') or tags.get('ref') or tags.get('brand')
+                if not name:
+                    continue
+                lat_e = element.get('lat') if element.get('type') == 'node' else element.get('center', {}).get('lat')
+                lon_e = element.get('lon') if element.get('type') == 'node' else element.get('center', {}).get('lon')
+                if lat_e is None or lon_e is None:
+                    continue
+                distance = haversine_km(lat, lon, float(lat_e), float(lon_e))
+                if distance > radius / 1000.0:
+                    continue
+                address = tags.get('addr:full') or ' '.join(filter(None, [tags.get('addr:street'), tags.get('addr:housenumber'), tags.get('addr:city'), tags.get('addr:postcode')]))
+                if not address:
+                    address = tags.get('operator') or tags.get('name') or 'Unknown address'
+                results.append({
+                    'name': name,
+                    'address': address,
+                    'latitude': float(lat_e),
+                    'longitude': float(lon_e),
+                    'distance_km': round(distance, 3),
+                })
+            if results:
+                results.sort(key=lambda item: item['distance_km'])
+                return results[:limit]
+            last_error = f"Overpass {overpass_url} returned {len(elements)} elements but no usable matches"
+        except Exception as e:
+            last_error = f"Overpass request failed for {amenity} on {overpass_url}: {e}"
+            print(last_error)
+            continue
+
+    if last_error:
+        print(last_error)
+    return []
+
+
 # Create all tables (note: PostGIS extension must be active in DB)
 Base.metadata.create_all(bind=engine)
 
@@ -284,6 +418,9 @@ class SOSResponse(BaseModel):
 class SOSRespondRequest(BaseModel):
     responder_phone: str
     responder_name: str
+
+class SOSResolveRequest(BaseModel):
+    responder_phone: str
 
 @app.post("/api/volunteers/register")
 def register_volunteer(payload: VolunteerRegisterRequest, db = Depends(get_db)):
@@ -493,16 +630,17 @@ def respond_to_sos(sos_id: int, payload: SOSRespondRequest, db = Depends(get_db)
     is only updated if it still satisfies all the claim conditions at UPDATE time,
     closing the TOCTOU gap between the check and the commit.
     """
+    normalized_responder_phone = normalize_phone_for_sms(payload.responder_phone)
     updated = db.query(models.SOSEvent).filter(
         models.SOSEvent.id == sos_id,
         models.SOSEvent.status != "cancelled",
-        models.SOSEvent.user_phone != payload.responder_phone,
-        or_(models.SOSEvent.responder_id.is_(None), models.SOSEvent.responder_id == payload.responder_phone),
+        models.SOSEvent.user_phone != normalized_responder_phone,
+        or_(models.SOSEvent.responder_id.is_(None), models.SOSEvent.responder_id == normalized_responder_phone),
     ).update({
         "status": "responding",
-        "responder_id": payload.responder_phone,
+        "responder_id": normalized_responder_phone,
         "responder_name": payload.responder_name,
-        "responder_phone": payload.responder_phone,
+        "responder_phone": normalized_responder_phone,
     }, synchronize_session=False)
     db.commit()
 
@@ -514,9 +652,36 @@ def respond_to_sos(sos_id: int, payload: SOSRespondRequest, db = Depends(get_db)
             raise HTTPException(status_code=404, detail="SOS event not found")
         if sos.status == "cancelled":
             raise HTTPException(status_code=400, detail="This SOS is no longer active")
-        if sos.user_phone == payload.responder_phone:
+        if sos.user_phone == normalized_responder_phone:
             raise HTTPException(status_code=400, detail="Cannot respond to your own SOS")
         raise HTTPException(status_code=400, detail="This SOS is already being handled by another responder")
+
+    sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+    return sos
+
+@app.patch("/api/sos/{sos_id}/resolve", response_model=SOSResponse)
+def resolve_sos(sos_id: int, payload: SOSResolveRequest, db = Depends(get_db)):
+    """Mark an SOS event resolved by the assigned community responder."""
+    normalized_responder_phone = normalize_phone_for_sms(payload.responder_phone)
+    updated = db.query(models.SOSEvent).filter(
+        models.SOSEvent.id == sos_id,
+        models.SOSEvent.status != "cancelled",
+        models.SOSEvent.responder_phone == normalized_responder_phone,
+    ).update({
+        "status": "cancelled",
+        "cancelled_at": datetime.utcnow(),
+    }, synchronize_session=False)
+    db.commit()
+
+    if updated == 0:
+        sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
+        if not sos:
+            raise HTTPException(status_code=404, detail="SOS event not found")
+        if sos.status == "cancelled":
+            raise HTTPException(status_code=400, detail="This SOS is no longer active")
+        if sos.responder_phone != normalized_responder_phone:
+            raise HTTPException(status_code=400, detail="Only the assigned responder can resolve this SOS")
+        raise HTTPException(status_code=400, detail="Unable to resolve this SOS")
 
     sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == sos_id).first()
     return sos
@@ -701,6 +866,86 @@ def get_heatmap_data(db = Depends(get_db)):
         for row in results
     ]
     return heatmap_data
+
+
+@app.get("/api/safety/current")
+def get_current_safety(lat: float, lon: float):
+    """Return the safety score and status at the current location."""
+    danger = get_model_danger_score(lat, lon)
+    score = danger_to_safety_score(danger)
+    return {
+        "latitude": lat,
+        "longitude": lon,
+        "danger_score": danger,
+        "safety_score": score,
+        "risk_level": safety_level(score),
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/safety/safe-zone")
+def get_safe_zone(lat: float, lon: float, db = Depends(get_db)):
+    """Find the safest nearby area using the crime incident heatmap and safety model."""
+    radius_km = 3.0
+    points_query = text("""
+        SELECT latitude, longitude, severity
+        FROM crime_incidents
+        WHERE latitude BETWEEN :min_lat AND :max_lat
+          AND longitude BETWEEN :min_lon AND :max_lon
+        LIMIT 1500;
+    """)
+    delta = 0.04
+    rows = db.execute(points_query, {
+        'min_lat': lat - delta,
+        'max_lat': lat + delta,
+        'min_lon': lon - delta,
+        'max_lon': lon + delta,
+    }).fetchall()
+
+    candidates = []
+    for row in rows:
+        cand_lat = normalize_lonlat(row[0])
+        cand_lon = normalize_lonlat(row[1])
+        distance = haversine_km(lat, lon, cand_lat, cand_lon)
+        if distance > radius_km:
+            continue
+        danger = get_model_danger_score(cand_lat, cand_lon)
+        if danger is None:
+            severity = float(row[2]) if row[2] is not None else 0.0
+            danger = round(severity * 0.5, 3)
+        candidates.append({
+            'latitude': cand_lat,
+            'longitude': cand_lon,
+            'danger_score': danger,
+            'distance_km': distance,
+        })
+
+    if not candidates:
+        raise HTTPException(status_code=404, detail='No safe zone found within the search radius.')
+
+    best = min(candidates, key=lambda item: item['danger_score'])
+    name = reverse_geocode(best['latitude'], best['longitude'])
+    safety_score = danger_to_safety_score(best['danger_score'])
+    return {
+        'latitude': best['latitude'],
+        'longitude': best['longitude'],
+        'area_name': name or 'Nearest safe area',
+        'distance_km': round(best['distance_km'], 3),
+        'estimated_walk_minutes': max(1, round((best['distance_km'] / 5.0) * 60)),
+        'danger_score': best['danger_score'],
+        'safety_score': safety_score,
+    }
+
+
+@app.get("/api/safety/police")
+def get_nearby_police(lat: float, lon: float, radius: int = 3000):
+    return query_overpass_amenities(lat, lon, 'police', radius=radius, limit=3)
+
+
+@app.get("/api/safety/hospitals")
+def get_nearby_hospitals(lat: float, lon: float, radius: int = 3000):
+    return query_overpass_amenities(lat, lon, 'hospital', radius=radius, limit=3)
+
 
 @app.get("/api/routes")
 def get_safe_routes(start_lat: float, start_lon: float, end_lat: float, end_lon: float):

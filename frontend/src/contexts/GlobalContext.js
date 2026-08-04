@@ -5,6 +5,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const GlobalContext = createContext();
 
+const DEFAULT_USER_PROFILE = {
+  name: '',
+  phone: '',
+  profilePicture: '',
+  emergencyContactName: '',
+  emergencyContactPhone: '',
+};
+
 export const GlobalProvider = ({ children }) => {
   const [isSOSActive, setIsSOSActive] = useState(false);
   const [location, setLocation] = useState(null);
@@ -15,12 +23,7 @@ export const GlobalProvider = ({ children }) => {
   const [isContextLoaded, setIsContextLoaded] = useState(false);
 
   // Populated after login (SOSScreen.js needs this to identify the victim & text the contact)
-  const [userProfile, setUserProfile] = useState({
-    name: '',
-    phone: '',
-    emergencyContactName: '',
-    emergencyContactPhone: '',
-  });
+  const [userProfile, setUserProfile] = useState(DEFAULT_USER_PROFILE);
 
   // The currently dispatched SOS record (null when no SOS is active), and any dispatch error
   const [activeSOS, setActiveSOS] = useState(null);
@@ -44,7 +47,7 @@ export const GlobalProvider = ({ children }) => {
   const logout = async () => {
     setUser(null);
     setIsLoggedIn(false);
-    setUserProfile({ name: '', phone: '', emergencyContactName: '', emergencyContactPhone: '' });
+    setUserProfile(DEFAULT_USER_PROFILE);
     await AsyncStorage.multiRemove(['@aegis_user', '@aegis_profile']);
   };
 
@@ -58,7 +61,7 @@ export const GlobalProvider = ({ children }) => {
         }
         const storedProfile = await AsyncStorage.getItem('@aegis_profile');
         if (storedProfile) {
-          setUserProfile(JSON.parse(storedProfile));
+          setUserProfile({ ...DEFAULT_USER_PROFILE, ...JSON.parse(storedProfile) });
         }
       } catch (e) {
         console.error("Failed to load user state", e);
@@ -80,22 +83,35 @@ export const GlobalProvider = ({ children }) => {
     );
   }, [userProfile, isContextLoaded]);
 
+  const normalizePhone = (phone) => {
+    if (!phone) return '';
+    const cleaned = String(phone).trim();
+    const digitsOnly = cleaned.replace(/\D/g, '');
+    if (!digitsOnly) return cleaned;
+    if (cleaned.startsWith('+')) return cleaned;
+    if (digitsOnly.length === 10) return `+91${digitsOnly}`;
+    if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) return `+91${digitsOnly.slice(1)}`;
+    if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) return `+${digitsOnly}`;
+    return `+${digitsOnly}`;
+  };
+
   const triggerSOS = async () => {
     if (!location) {
       setSosError('Location not available yet. Please wait for GPS lock.');
       return null;
     }
     try {
+      const normalizedUserPhone = normalizePhone(userProfile.phone) || 'Unknown';
       const response = await fetch(`${API_BASE_URL}/api/sos/trigger`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_name: userProfile.name || 'Unknown',
-          user_phone: userProfile.phone || 'Unknown',
+          user_phone: normalizedUserPhone,
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
           emergency_contact_name: userProfile.emergencyContactName || null,
-          emergency_contact_phone: userProfile.emergencyContactPhone || null,
+          emergency_contact_phone: normalizePhone(userProfile.emergencyContactPhone) || null,
         }),
       });
       if (!response.ok) throw new Error('SOS trigger request failed');
@@ -124,30 +140,56 @@ export const GlobalProvider = ({ children }) => {
   };
 
   const fetchNearbySOS = async () => {
-    if (!location || !userProfile.phone) return;
+    const normalizedUserPhone = normalizePhone(userProfile.phone);
+    if (!location || !normalizedUserPhone) return;
     try {
       const params = new URLSearchParams({
         lat: location.coords.latitude,
         lon: location.coords.longitude,
         radius: 5,
-        exclude_phone: userProfile.phone,
+        exclude_phone: normalizedUserPhone,
       });
       const resp = await fetch(`${API_BASE_URL}/api/sos/active?${params}`);
       if (!resp.ok) return;
       const data = await resp.json();
-      setNearbySOS(data.sos_events || []);
+      const raw = data.sos_events || [];
+      // Recompute distances client-side (haversine) to avoid format mismatches
+      const haversineKm = (lat1, lon1, lat2, lon2) => {
+        const toRad = (v) => (v * Math.PI) / 180.0;
+        const R = 6371.0;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return 2 * R * Math.asin(Math.sqrt(a));
+      };
+      const normalized = raw.map((r) => {
+        const lat = Number(r.latitude);
+        const lon = Number(r.longitude);
+        const d = isFinite(lat) && isFinite(lon) ? haversineKm(location.coords.latitude, location.coords.longitude, lat, lon) : null;
+        return { ...r, distance_km: d != null ? Math.round(d * 1000) / 1000 : null };
+      });
+      normalized.sort((a, b) => {
+        const da = Number.isFinite(a.distance_km) ? a.distance_km : Number.POSITIVE_INFINITY;
+        const db = Number.isFinite(b.distance_km) ? b.distance_km : Number.POSITIVE_INFINITY;
+        return da - db;
+      });
+      setNearbySOS(normalized);
     } catch (err) {
       console.error('Nearby SOS fetch failed:', err);
     }
   };
 
   const respondToSOS = async (sosId) => {
+    if (!userProfile.phone) {
+      return { success: false, error: 'Responder phone is not available.' };
+    }
+    const responderPhone = normalizePhone(userProfile.phone);
     try {
       const resp = await fetch(`${API_BASE_URL}/api/sos/${sosId}/respond`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          responder_phone: userProfile.phone,
+          responder_phone: responderPhone,
           responder_name: userProfile.name || 'A community member',
         }),
       });
@@ -159,6 +201,29 @@ export const GlobalProvider = ({ children }) => {
       return { success: true, sos: data };
     } catch (err) {
       console.error('Respond to SOS failed:', err);
+      return { success: false, error: 'Could not reach AEGIS servers.' };
+    }
+  };
+
+  const resolveSOS = async (sosId, responderPhone) => {
+    if (!responderPhone) {
+      return { success: false, error: 'Responder phone is not available.' };
+    }
+    const normalizedResponderPhone = normalizePhone(responderPhone);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/sos/${sosId}/resolve`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ responder_phone: normalizedResponderPhone }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        return { success: false, error: data.detail || 'Could not resolve this SOS.' };
+      }
+      await fetchNearbySOS();
+      return { success: true, sos: data };
+    } catch (err) {
+      console.error('Resolve SOS failed:', err);
       return { success: false, error: 'Could not reach AEGIS servers.' };
     }
   };
@@ -236,6 +301,8 @@ export const GlobalProvider = ({ children }) => {
         sosError,
         nearbySOS,
         respondToSOS,
+        resolveSOS,
+        normalizePhone,
         user,
         setUser: handleSetUser,
         notifications,

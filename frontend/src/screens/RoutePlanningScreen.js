@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, Dimensions, Alert } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MapView, Polyline, Marker, PROVIDER_GOOGLE } from '../components/MapViewWrapper';
 import * as Location from 'expo-location';
@@ -14,6 +14,7 @@ import { API_BASE_URL } from '../config';
 export default function RoutePlanningScreen() {
   const navigation = useNavigation();
   const { location } = useContext(GlobalContext);
+  const route = useRoute();
   const [loading, setLoading] = useState(false);
   const [destination, setDestination] = useState({ name: '', coords: null });
   const [routes, setRoutes] = useState([]);
@@ -80,6 +81,17 @@ export default function RoutePlanningScreen() {
       });
     }
   }, [routes, selectedRouteIndex, isNavigating]);
+
+  useEffect(() => {
+    const params = route.params?.destination;
+    if (params?.lat != null && params?.lon != null) {
+      const coords = { latitude: params.lat, longitude: params.lon };
+      if (!destination.coords || destination.coords.latitude !== coords.latitude || destination.coords.longitude !== coords.longitude) {
+        setDestination({ name: params.name || 'Destination', coords });
+        fetchRoutes(coords);
+      }
+    }
+  }, [route.params?.destination]);
 
   useEffect(() => {
     const timer = setTimeout(() => {

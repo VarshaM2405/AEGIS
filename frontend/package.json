@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start . --tunnel --clear",
-    "start:lan": "expo start . --lan --host lan --clear",
+    "start:lan": "expo start . --lan --clear",
     "start:tunnel": "expo start . --tunnel --clear",
     "start:local": "expo start . --localhost --clear",
     "android": "expo start . --android",

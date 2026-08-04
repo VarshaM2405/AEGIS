@@ -51,15 +51,17 @@ export default function ReportScreen() {
 
   const requestPermissions = async (camera = false) => {
     if (camera) {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
+      const res = await ImagePicker.requestCameraPermissionsAsync();
+      const cameraStatus = res?.status ?? res?.granted ?? null;
+      if (cameraStatus !== 'granted' && cameraStatus !== true) {
         Alert.alert('Permission required', 'Camera access is needed to take photos.');
         return false;
       }
     }
 
-    const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (libraryStatus !== 'granted') {
+    const libRes = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const libraryStatus = libRes?.status ?? libRes?.granted ?? null;
+    if (libraryStatus !== 'granted' && libraryStatus !== true) {
       Alert.alert('Permission required', 'Photo library access is needed to choose images.');
       return false;
     }
