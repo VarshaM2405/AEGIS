@@ -6,6 +6,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import text, or_
+from sqlalchemy.exc import IntegrityError
 from database import engine, Base, SessionLocal, get_db
 import models
 import time
@@ -118,6 +119,20 @@ def get_user_info(db, phone: str):
         "area": user.area if user else None,
         "profile_photo": None
     }
+
+
+def get_confirmation_info(db, report_id: int, viewer_phone: str = None):
+    """(confirmation_count, confirmed_by_me) for one report. Scope note: this only
+    feeds report display/trust UI — it never touches crime_incidents, the heatmap,
+    or the ML safety model, which are sourced solely from the historical CSV data."""
+    count = db.query(models.ReportConfirmation).filter(models.ReportConfirmation.report_id == report_id).count()
+    confirmed_by_me = False
+    if viewer_phone:
+        confirmed_by_me = db.query(models.ReportConfirmation).filter(
+            models.ReportConfirmation.report_id == report_id,
+            models.ReportConfirmation.confirmer_phone == viewer_phone,
+        ).first() is not None
+    return count, confirmed_by_me
 
 def haversine_km(lat1, lon1, lat2, lon2):
     """Great-circle distance between two lat/lon points, in kilometers."""
@@ -297,6 +312,31 @@ def ensure_sos_columns():
         db.close()
 
 @app.on_event("startup")
+def ensure_wearable_columns():
+    """Additive-only migration for automatic distress detection: five nullable
+    columns on sos_events, no new tables. Same PRAGMA-driven pattern as
+    ensure_report_columns above, which works on both SQLite (local/dev) and
+    Postgres."""
+    db = SessionLocal()
+    try:
+        cols = [row[1] for row in db.execute(text("PRAGMA table_info(sos_events)")).fetchall()]
+        for name, ddl in [
+            ("source", "VARCHAR DEFAULT 'manual'"),
+            ("detection_bpm", "FLOAT"),
+            ("detection_motion_score", "FLOAT"),
+            ("detection_confidence", "FLOAT"),
+            ("detection_timestamp", "DATETIME"),
+        ]:
+            if name not in cols:
+                db.execute(text(f"ALTER TABLE sos_events ADD COLUMN {name} {ddl}"))
+        db.commit()
+    except Exception as e:
+        print(f"Error ensuring wearable columns: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+@app.on_event("startup")
 def load_csv_data():
     db = SessionLocal()
     try:
@@ -393,6 +433,13 @@ class SOSTriggerRequest(BaseModel):
     longitude: float
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
+    # Populated when the wearable's on-device DetectionEngine fires (source
+    # defaults to "manual" for the existing SOS button path).
+    source: Optional[str] = "manual"
+    detection_bpm: Optional[float] = None
+    detection_motion_score: Optional[float] = None
+    detection_confidence: Optional[float] = None
+    detection_timestamp: Optional[datetime] = None
 
 class SOSResponse(BaseModel):
     id: int
@@ -411,6 +458,11 @@ class SOSResponse(BaseModel):
     sms_sent: Optional[bool] = None
     sms_message: Optional[str] = None
     nearby_guardians: Optional[list[str]] = None
+    source: Optional[str] = "manual"
+    detection_bpm: Optional[float] = None
+    detection_motion_score: Optional[float] = None
+    detection_confidence: Optional[float] = None
+    detection_timestamp: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -493,6 +545,11 @@ def trigger_sos(payload: SOSTriggerRequest, db = Depends(get_db)):
         latitude=payload.latitude,
         longitude=payload.longitude,
         status="active",
+        source=payload.source or "manual",
+        detection_bpm=payload.detection_bpm,
+        detection_motion_score=payload.detection_motion_score,
+        detection_confidence=payload.detection_confidence,
+        detection_timestamp=payload.detection_timestamp,
     )
     db.add(sos)
     db.commit()
@@ -579,6 +636,11 @@ def trigger_sos(payload: SOSTriggerRequest, db = Depends(get_db)):
         "sms_sent": sms_sent,
         "sms_message": sms_message,
         "nearby_guardians": nearby_guardians,
+        "source": sos.source,
+        "detection_bpm": sos.detection_bpm,
+        "detection_motion_score": sos.detection_motion_score,
+        "detection_confidence": sos.detection_confidence,
+        "detection_timestamp": sos.detection_timestamp,
     }
 
 @app.patch("/api/sos/{sos_id}/cancel", response_model=SOSResponse)
@@ -616,6 +678,11 @@ def get_active_sos(lat: float, lon: float, radius: float = 5.0, exclude_phone: s
                 "responder_name": e.responder_name,
                 "responder_phone": e.responder_phone,
                 "distance_km": round(distance, 3),
+                "source": e.source,
+                "detection_bpm": e.detection_bpm,
+                "detection_motion_score": e.detection_motion_score,
+                "detection_confidence": e.detection_confidence,
+                "detection_timestamp": e.detection_timestamp.isoformat() if e.detection_timestamp else None,
             })
 
     results.sort(key=lambda r: r["distance_km"])
@@ -1101,6 +1168,8 @@ def respond_to_incident_report(report_id: int, req: ReportRespondRequest, db=Dep
     db.commit()
     db.refresh(report)
 
+    confirmation_count, confirmed_by_me = get_confirmation_info(db, report.id, req.userId)
+
     return {
         "status": "success",
         "report": {
@@ -1116,30 +1185,299 @@ def respond_to_incident_report(report_id: int, req: ReportRespondRequest, db=Dep
             "reporter": get_user_info(db, report.user_id),
             "responder": get_user_info(db, report.responder_id),
             "photos": json.loads(report.photos) if report.photos else [],
+            "confirmation_count": confirmation_count,
+            "confirmed_by_me": confirmed_by_me,
         }
     }
 
+class ReportConfirmRequest(BaseModel):
+    userId: str
+
+@app.post("/api/reports/{report_id}/confirm")
+def confirm_incident_report(report_id: int, req: ReportConfirmRequest, db=Depends(get_db)):
+    """A nearby user vouches a report is real. One confirmation per user per report,
+    enforced by ReportConfirmation's DB-level UniqueConstraint (not an app-level
+    check-then-insert, which would race)."""
+    report = db.query(models.IncidentReport).filter(models.IncidentReport.id == report_id).first()
+    if not report:
+        return {"status": "error", "message": "Report not found"}
+    if report.user_id and report.user_id == req.userId:
+        return {"status": "error", "message": "Reporter cannot confirm their own report"}
+
+    confirmation = models.ReportConfirmation(report_id=report_id, confirmer_phone=req.userId)
+    db.add(confirmation)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        count, _ = get_confirmation_info(db, report_id, req.userId)
+        return {"status": "already_confirmed", "confirmation_count": count, "confirmed_by_me": True}
+
+    count, _ = get_confirmation_info(db, report_id, req.userId)
+    return {"status": "success", "confirmation_count": count, "confirmed_by_me": True}
+
 @app.get("/api/reports")
-def get_incident_reports(db=Depends(get_db)):
+def get_incident_reports(viewer_phone: str = None, db=Depends(get_db)):
     """Returns all incident reports for frontend notifications and map alerts."""
     reports = db.query(models.IncidentReport).order_by(models.IncidentReport.id.desc()).limit(50).all()
+    result = []
+    for r in reports:
+        confirmation_count, confirmed_by_me = get_confirmation_info(db, r.id, viewer_phone)
+        result.append({
+            "id": r.id,
+            "type": r.type,
+            "description": r.description,
+            "latitude": float(r.latitude) if r.latitude is not None else None,
+            "longitude": float(r.longitude) if r.longitude is not None else None,
+            "status": r.status,
+            "responder_id": r.responder_id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "user_id": r.user_id,
+            "reporter": get_user_info(db, r.user_id),
+            "responder": get_user_info(db, r.responder_id),
+            "photos": json.loads(r.photos) if r.photos else [],
+            "responder_status": "responding" if r.responder_id else "waiting",
+            "confirmation_count": confirmation_count,
+            "confirmed_by_me": confirmed_by_me,
+        })
+    return {"reports": result}
+
+# --- TRIP SHARING ENDPOINTS ---
+# In-app-only (recipient must have AEGIS): the owner starts a trip, the app periodically
+# posts location while it's active, and the recipient looks it up by trip_code (texted to
+# them at start, see StartTripScreen.js's expo-sms flow — no deep-link infra configured).
+
+TRIP_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"  # excludes ambiguous 0/O, 1/I
+
+
+def generate_trip_code(length: int = 6) -> str:
+    return ''.join(random.choices(TRIP_CODE_ALPHABET, k=length))
+
+
+class TripStartRequest(BaseModel):
+    owner_phone: str
+    owner_name: str | None = None
+    recipient_phone: str | None = None
+    latitude: float
+    longitude: float
+    destination_label: str | None = None
+    destination_latitude: float | None = None
+    destination_longitude: float | None = None
+    eta_minutes: int | None = None
+
+
+class TripLocationUpdateRequest(BaseModel):
+    owner_phone: str
+    latitude: float
+    longitude: float
+
+
+class TripEndRequest(BaseModel):
+    owner_phone: str
+
+
+def serialize_trip(trip):
     return {
-        "reports": [
-            {
-                "id": r.id,
-                "type": r.type,
-                "description": r.description,
-                "latitude": float(r.latitude) if r.latitude is not None else None,
-                "longitude": float(r.longitude) if r.longitude is not None else None,
-                "status": r.status,
-                "responder_id": r.responder_id,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "user_id": r.user_id,
-                "reporter": get_user_info(db, r.user_id),
-                "responder": get_user_info(db, r.responder_id),
-                "photos": json.loads(r.photos) if r.photos else [],
-                "responder_status": "responding" if r.responder_id else "waiting"
-            }
-            for r in reports
-        ]
+        "id": trip.id,
+        "trip_code": trip.trip_code,
+        "owner_phone": trip.owner_phone,
+        "owner_name": trip.owner_name,
+        "recipient_phone": trip.recipient_phone,
+        "status": trip.status,
+        "start_latitude": trip.start_latitude,
+        "start_longitude": trip.start_longitude,
+        "latitude": trip.latitude,
+        "longitude": trip.longitude,
+        "destination_label": trip.destination_label,
+        "destination_latitude": trip.destination_latitude,
+        "destination_longitude": trip.destination_longitude,
+        "eta_minutes": trip.eta_minutes,
+        "created_at": trip.created_at.isoformat() if trip.created_at else None,
+        "updated_at": trip.updated_at.isoformat() if trip.updated_at else None,
+        "ended_at": trip.ended_at.isoformat() if trip.ended_at else None,
     }
+
+
+@app.post("/api/trips/start")
+def start_trip(req: TripStartRequest, db=Depends(get_db)):
+    """Begin a live trip-sharing session. Generates a short human-typeable code the
+    owner texts to their recipient."""
+    normalized_owner_phone = normalize_phone_for_sms(req.owner_phone)
+    normalized_recipient_phone = normalize_phone_for_sms(req.recipient_phone) if req.recipient_phone else None
+
+    trip_code = None
+    for _ in range(5):
+        candidate = generate_trip_code()
+        existing = db.query(models.Trip).filter(models.Trip.trip_code == candidate).first()
+        if not existing:
+            trip_code = candidate
+            break
+    if not trip_code:
+        raise HTTPException(status_code=500, detail="Could not generate a unique trip code, please try again")
+
+    trip = models.Trip(
+        trip_code=trip_code,
+        owner_phone=normalized_owner_phone,
+        owner_name=req.owner_name,
+        recipient_phone=normalized_recipient_phone,
+        status="active",
+        start_latitude=req.latitude,
+        start_longitude=req.longitude,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        destination_label=req.destination_label,
+        destination_latitude=req.destination_latitude,
+        destination_longitude=req.destination_longitude,
+        eta_minutes=req.eta_minutes,
+    )
+    db.add(trip)
+    db.commit()
+    db.refresh(trip)
+    return serialize_trip(trip)
+
+
+@app.post("/api/trips/{trip_id}/location")
+def update_trip_location(trip_id: int, req: TripLocationUpdateRequest, db=Depends(get_db)):
+    """Owner's periodic location ping while a trip is active. Atomic conditional UPDATE,
+    same pattern as respond_to_sos/resolve_sos — only applies if still active and still
+    owned by this phone, closing the same TOCTOU gap a read-then-write would leave open."""
+    normalized_owner_phone = normalize_phone_for_sms(req.owner_phone)
+    updated = db.query(models.Trip).filter(
+        models.Trip.id == trip_id,
+        models.Trip.owner_phone == normalized_owner_phone,
+        models.Trip.status == "active",
+    ).update({
+        "latitude": req.latitude,
+        "longitude": req.longitude,
+        "updated_at": datetime.utcnow(),
+    }, synchronize_session=False)
+    db.commit()
+
+    if updated == 0:
+        trip = db.query(models.Trip).filter(models.Trip.id == trip_id).first()
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+        if trip.status != "active":
+            raise HTTPException(status_code=400, detail="This trip is no longer active")
+        raise HTTPException(status_code=403, detail="Only the trip owner can update its location")
+
+    trip = db.query(models.Trip).filter(models.Trip.id == trip_id).first()
+    return serialize_trip(trip)
+
+
+@app.patch("/api/trips/{trip_id}/end")
+def end_trip(trip_id: int, req: TripEndRequest, db=Depends(get_db)):
+    """Owner marks the trip complete (arrived safely)."""
+    normalized_owner_phone = normalize_phone_for_sms(req.owner_phone)
+    updated = db.query(models.Trip).filter(
+        models.Trip.id == trip_id,
+        models.Trip.owner_phone == normalized_owner_phone,
+        models.Trip.status == "active",
+    ).update({
+        "status": "ended",
+        "ended_at": datetime.utcnow(),
+    }, synchronize_session=False)
+    db.commit()
+
+    if updated == 0:
+        trip = db.query(models.Trip).filter(models.Trip.id == trip_id).first()
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+        if trip.status != "active":
+            raise HTTPException(status_code=400, detail="This trip is no longer active")
+        raise HTTPException(status_code=403, detail="Only the trip owner can end this trip")
+
+    trip = db.query(models.Trip).filter(models.Trip.id == trip_id).first()
+    return serialize_trip(trip)
+
+
+@app.get("/api/trips/by-code/{trip_code}")
+def get_trip_by_code(trip_code: str, db=Depends(get_db)):
+    """Public lookup for the recipient's tracking screen — no auth, consistent with
+    the rest of this backend's trust model."""
+    trip = db.query(models.Trip).filter(models.Trip.trip_code == trip_code.upper()).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found — check the code and try again")
+    return serialize_trip(trip)
+
+# --- CHAT ENDPOINTS ---
+# One thread per (thread_type, thread_id) — "sos"+SOSEvent.id or "report"+IncidentReport.id.
+# Only usable once a responder is assigned; only the two parties on that thread may post.
+
+class MessageSendRequest(BaseModel):
+    thread_type: str  # "sos" | "report"
+    thread_id: int
+    sender_phone: str
+    sender_name: str | None = None
+    body: str
+
+
+def serialize_message(message):
+    return {
+        "id": message.id,
+        "thread_type": message.thread_type,
+        "thread_id": message.thread_id,
+        "sender_phone": message.sender_phone,
+        "sender_name": message.sender_name,
+        "body": message.body,
+        "created_at": message.created_at.isoformat() if message.created_at else None,
+    }
+
+
+@app.post("/api/messages")
+def send_message(req: MessageSendRequest, db=Depends(get_db)):
+    """Send a chat message on an SOS or report thread. Requires a responder already
+    assigned (chat only makes sense post-claim) and the sender to be one of the two
+    parties on that thread."""
+    if req.thread_type not in ("sos", "report"):
+        raise HTTPException(status_code=400, detail="thread_type must be 'sos' or 'report'")
+    if not req.body or not req.body.strip():
+        raise HTTPException(status_code=400, detail="Message body cannot be empty")
+
+    normalized_sender_phone = normalize_phone_for_sms(req.sender_phone)
+
+    if req.thread_type == "sos":
+        sos = db.query(models.SOSEvent).filter(models.SOSEvent.id == req.thread_id).first()
+        if not sos:
+            raise HTTPException(status_code=404, detail="SOS event not found")
+        if not sos.responder_phone:
+            raise HTTPException(status_code=400, detail="This SOS has no responder yet — nothing to chat about")
+        # SOSEvent's phone fields are already normalized at write-time (trigger_sos /
+        # respond_to_sos), so comparing normalized-to-normalized is correct here.
+        allowed_phones = {normalize_phone_for_sms(sos.user_phone), normalize_phone_for_sms(sos.responder_phone)}
+        if normalized_sender_phone not in allowed_phones:
+            raise HTTPException(status_code=403, detail="Only the victim and responder can message on this thread")
+    else:
+        report = db.query(models.IncidentReport).filter(models.IncidentReport.id == req.thread_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        if not report.responder_id:
+            raise HTTPException(status_code=400, detail="This report has no responder yet — nothing to chat about")
+        # IncidentReport.user_id/responder_id are NOT phone-normalized (existing convention
+        # on that table, unlike SOSEvent) — compare the raw sender_phone to match it.
+        allowed_ids = {report.user_id, report.responder_id}
+        if req.sender_phone not in allowed_ids:
+            raise HTTPException(status_code=403, detail="Only the reporter and responder can message on this thread")
+
+    message = models.Message(
+        thread_type=req.thread_type,
+        thread_id=req.thread_id,
+        sender_phone=req.sender_phone,
+        sender_name=req.sender_name,
+        body=req.body.strip(),
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    return serialize_message(message)
+
+
+@app.get("/api/messages")
+def get_messages(thread_type: str, thread_id: int, db=Depends(get_db)):
+    """Full ordered thread, polled every 3s by ChatScreen.js — no pagination needed,
+    matches /api/reports' existing "just refetch everything" style."""
+    messages = db.query(models.Message).filter(
+        models.Message.thread_type == thread_type,
+        models.Message.thread_id == thread_id,
+    ).order_by(models.Message.id.asc()).all()
+    return {"messages": [serialize_message(m) for m in messages]}

@@ -15,7 +15,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to use the flashlight.",
-        "NSMicrophoneUsageDescription": "This app needs microphone access for audio features."
+        "NSMicrophoneUsageDescription": "This app needs microphone access for audio features.",
+        "NSMotionUsageDescription": "AEGIS needs motion data to detect falls and distress."
       }
     },
     "android": {
@@ -26,14 +27,33 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-      ]
+        "android.permission.RECORD_AUDIO",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT"
+      ],
+      "package": "com.anonymous.frontend"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "AEGIS needs Bluetooth to read your wearable's heart rate."
+        }
+      ]
+    ],
     "extra": {
-      "_TODO_apiBaseUrl": "For physical-device testing on the same Wi-Fi network, set apiBaseUrl to your machine's LAN IP (find via `ipconfig getifaddr en0`), e.g. http://172.20.10.2:8000 - localhost won't resolve from a real phone."
+      "_TODO_apiBaseUrl": "For physical-device testing on the same Wi-Fi network, set apiBaseUrl to your machine's LAN IP (find via `ipconfig getifaddr en0`), e.g. http://172.20.10.2:8000 - localhost won't resolve from a real phone.",
+      "eas": {
+        "projectId": "7cebe1da-740f-49c4-ae04-7e5a22cdfd20"
+      }
     }
   }
 }

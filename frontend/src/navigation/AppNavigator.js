@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -9,11 +9,20 @@ import SafetyScreen from '../screens/SafetyScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ReportScreen from '../screens/ReportScreen';
 import ZonesScreen from '../screens/ZonesScreen';
+import WearableScreen from '../screens/WearableScreen';
+import FakeCallScreen from '../screens/FakeCallScreen';
+import StartTripScreen from '../screens/StartTripScreen';
+import TripActiveScreen from '../screens/TripActiveScreen';
+import TrackTripScreen from '../screens/TrackTripScreen';
+import ChatScreen from '../screens/ChatScreen';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Map, ShieldAlert, Shield, User } from 'lucide-react-native';
 import { View, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import SplashScreen from '../screens/SplashScreen';
 import { TouchableOpacity } from 'react-native';
+import { GlobalContext } from '../contexts/GlobalContext';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -21,6 +30,15 @@ const Tab = createBottomTabNavigator();
 const EmptyScreen = () => null;
 
 function MainTabs() {
+  // edgeToEdgeEnabled (app.json) draws the app behind Android's system nav bar, and a
+  // custom tabBarStyle height/padding opts out of bottom-tabs' own automatic safe-area
+  // handling — without folding insets.bottom back in here, the bar (and its labels) end
+  // up partly underneath the on-screen nav buttons on gesture-nav and 3-button-nav phones.
+  const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
+  const { userProfile } = useContext(GlobalContext);
+  const fakeCallShortcutEnabled = userProfile.fakeCallShortcutEnabled !== false;
+
   return (
     <View style={{ flex: 1 }}>
       <Tab.Navigator
@@ -29,7 +47,7 @@ function MainTabs() {
           tabBarActiveTintColor: '#D81B60',
           tabBarInactiveTintColor: '#DDA7A5',
           tabBarLabelStyle: { fontFamily: 'Outfit_700Bold', fontSize: 11, marginTop: 2 },
-          tabBarStyle: { height: 90, paddingBottom: 30, paddingTop: 10, borderTopWidth: 0, elevation: 20, shadowColor: '#DDA7A5', shadowOpacity: 0.15, shadowRadius: 10 },
+          tabBarStyle: { height: 60 + insets.bottom, paddingBottom: insets.bottom + 10, paddingTop: 10, borderTopWidth: 0, elevation: 20, shadowColor: '#DDA7A5', shadowOpacity: 0.15, shadowRadius: 10 },
           tabBarIcon: ({ color, size }) => {
             let IconComp;
             if (route.name === 'HomeTab') IconComp = Home;
@@ -92,7 +110,29 @@ function MainTabs() {
           }}
         />
         <Tab.Screen name="SafetyTab" component={SafetyScreen} options={{ tabBarLabel: 'Safety' }} />
-        <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ tabBarLabel: 'Profile' }} />
+        <Tab.Screen
+          name="ProfileTab"
+          component={ProfileScreen}
+          options={{
+            tabBarLabel: 'Profile',
+            // Discreet fake-call trigger: a long-press on this icon (toggleable in
+            // Profile settings) reads as fidgeting to an onlooker rather than a
+            // deliberate safety action, and needs no navigation away from wherever
+            // you currently are. props.children is the already-rendered icon+label
+            // for this tab — spreading it through unchanged keeps the tab looking
+            // identical to every other one; only the long-press behavior is added.
+            tabBarButton: (props) =>
+              fakeCallShortcutEnabled ? (
+                <TouchableOpacity
+                  {...props}
+                  delayLongPress={650}
+                  onLongPress={() => navigation.navigate('FakeCall')}
+                />
+              ) : (
+                <TouchableOpacity {...props} />
+              ),
+          }}
+        />
       </Tab.Navigator>
     </View>
   );
@@ -110,6 +150,16 @@ export default function AppNavigator() {
       <Stack.Screen name="SOSModal" component={SOSScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Report" component={ReportScreen} />
       <Stack.Screen name="Zones" component={ZonesScreen} />
+      <Stack.Screen name="Wearable" component={WearableScreen} />
+      <Stack.Screen
+        name="FakeCall"
+        component={FakeCallScreen}
+        options={{ presentation: 'fullScreenModal', gestureEnabled: false, animation: 'fade' }}
+      />
+      <Stack.Screen name="StartTrip" component={StartTripScreen} />
+      <Stack.Screen name="TripActive" component={TripActiveScreen} />
+      <Stack.Screen name="TrackTrip" component={TrackTripScreen} />
+      <Stack.Screen name="Chat" component={ChatScreen} />
     </Stack.Navigator>
   );
 }

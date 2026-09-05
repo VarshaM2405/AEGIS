@@ -1,12 +1,12 @@
 import React, { useContext, useEffect, useMemo, useState, useRef } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Alert, Image, Animated } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Modal, TextInput, Alert, Image, Animated, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import { User, PhoneForwarded, X, Info, Sparkles } from 'lucide-react-native';
+import { User, PhoneForwarded, X, Info, Sparkles, Watch, PhoneIncoming, Vibrate } from 'lucide-react-native';
 
 const safetyTips = [
   'Share your live location during late-night travel.',
@@ -24,8 +24,11 @@ export default function ProfileScreen() {
   const { user, setUser, logout, userProfile, setUserProfile, location } = useContext(GlobalContext);
   const [contactModalVisible, setContactModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [fakeCallModalVisible, setFakeCallModalVisible] = useState(false);
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
+  const [fakeCallerNameValue, setFakeCallerNameValue] = useState('');
+  const [fakeCallerPhotoValue, setFakeCallerPhotoValue] = useState('');
   const [nameValue, setNameValue] = useState(userProfile.name || user?.name || '');
   const [cityName, setCityName] = useState('Location unavailable');
   const [tip, setTip] = useState('Stay connected and stay safe.');
@@ -105,6 +108,50 @@ export default function ProfileScreen() {
       emergencyContactPhone: contactPhone.trim(),
     }));
     setContactModalVisible(false);
+  };
+
+  const toggleFakeCallShortcut = (value) => {
+    setUserProfile((prev) => ({ ...prev, fakeCallShortcutEnabled: value }));
+  };
+
+  const toggleShakeSOS = (value) => {
+    setUserProfile((prev) => ({ ...prev, shakeSOSEnabled: value }));
+  };
+
+  const openFakeCallModal = () => {
+    setFakeCallerNameValue(userProfile.fakeCallerName || '');
+    setFakeCallerPhotoValue(userProfile.fakeCallerPhoto || '');
+    setFakeCallModalVisible(true);
+  };
+
+  const pickFakeCallerPhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Please allow image access to set a caller photo.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+        allowsEditing: true,
+        aspect: [1, 1],
+      });
+      if (!result.canceled && result.assets?.length > 0) {
+        setFakeCallerPhotoValue(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.error('Fake caller image picker failed:', err);
+    }
+  };
+
+  const saveFakeCallSettings = () => {
+    setUserProfile((prev) => ({
+      ...prev,
+      fakeCallerName: fakeCallerNameValue.trim(),
+      fakeCallerPhoto: fakeCallerPhotoValue,
+    }));
+    setFakeCallModalVisible(false);
   };
 
   const openEditModal = () => {
@@ -212,6 +259,72 @@ export default function ProfileScreen() {
           </View>
           <TouchableOpacity onPress={openContactModal} className="mt-5 bg-[#FDF8F9] border border-[#D81B6050] rounded-3xl py-4 items-center">
             <Text className="text-[#D81B60] font-bold">Edit Contact</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View className="bg-white rounded-[32px] p-6 shadow-sm border border-[#E5B2B9]/50 mb-6">
+          <View className="flex-row items-center mb-4">
+            <View className="bg-[#D81B6050] p-3 rounded-3xl mr-4">
+              <Watch size={22} color="#D81B60" />
+            </View>
+            <View className="flex-1">
+              <Text className="text-[#4A2E35] font-black text-lg">Watch Sync</Text>
+              <Text className="text-[#9E7A80] text-sm mt-1">
+                {userProfile.wearableMonitoringEnabled ? 'Automatic distress detection is on.' : 'Set up a wearable for automatic SOS.'}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity onPress={() => navigation.navigate('Wearable')} className="mt-1 bg-[#FDF8F9] border border-[#D81B6050] rounded-3xl py-4 items-center">
+            <Text className="text-[#D81B60] font-bold">Configure Watch SOS</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View className="bg-white rounded-[32px] p-6 shadow-sm border border-[#E5B2B9]/50 mb-6">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center flex-1 pr-4">
+              <View className="bg-[#D81B6050] p-3 rounded-3xl mr-4">
+                <Vibrate size={22} color="#D81B60" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-[#4A2E35] font-black text-lg">Shake for Help</Text>
+                <Text className="text-[#9E7A80] text-sm mt-1">
+                  {userProfile.shakeSOSEnabled
+                    ? 'On — shake your phone hard 4 times to trigger a silent SOS.'
+                    : 'Off — trigger SOS without touching the button.'}
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={!!userProfile.shakeSOSEnabled}
+              onValueChange={toggleShakeSOS}
+              trackColor={{ false: '#E5B2B950', true: '#D81B6080' }}
+              thumbColor={userProfile.shakeSOSEnabled ? '#D81B60' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
+        <View className="bg-white rounded-[32px] p-6 shadow-sm border border-[#E5B2B9]/50 mb-6">
+          <View className="flex-row items-center justify-between mb-4">
+            <View className="flex-row items-center flex-1 pr-4">
+              <View className="bg-[#D81B6050] p-3 rounded-3xl mr-4">
+                <PhoneIncoming size={22} color="#D81B60" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-[#4A2E35] font-black text-lg">Fake Call</Text>
+                <Text className="text-[#9E7A80] text-sm mt-1">
+                  Long-press the Profile tab anywhere to get a decoy incoming call.
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={userProfile.fakeCallShortcutEnabled !== false}
+              onValueChange={toggleFakeCallShortcut}
+              trackColor={{ false: '#E5B2B950', true: '#D81B6080' }}
+              thumbColor={userProfile.fakeCallShortcutEnabled !== false ? '#D81B60' : '#f4f3f4'}
+            />
+          </View>
+          <TouchableOpacity onPress={openFakeCallModal} className="mt-1 bg-[#FDF8F9] border border-[#D81B6050] rounded-3xl py-4 items-center">
+            <Text className="text-[#D81B60] font-bold">Customize Caller</Text>
           </TouchableOpacity>
         </View>
 
@@ -324,6 +437,49 @@ export default function ProfileScreen() {
             <TouchableOpacity onPress={saveProfile} activeOpacity={0.8}>
               <LinearGradient colors={['#E5B2B9', '#D81B60']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} className="h-16 rounded-2xl items-center justify-center shadow-lg">
                 <Text className="text-white text-lg font-bold">Save Profile</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={fakeCallModalVisible} animationType="slide" transparent onRequestClose={() => setFakeCallModalVisible(false)}>
+        <View className="flex-1 bg-black/50 justify-center px-8">
+          <View className="bg-white rounded-[32px] p-6">
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-xl font-black text-[#4A2E35]">Fake Call Settings</Text>
+              <TouchableOpacity onPress={() => setFakeCallModalVisible(false)}>
+                <X size={22} color="#9E7A80" />
+              </TouchableOpacity>
+            </View>
+            <Text className="text-[#9E7A80] text-xs mb-5">
+              Choose who appears to be calling you.
+            </Text>
+
+            <TouchableOpacity onPress={pickFakeCallerPhoto} activeOpacity={0.8} className="items-center mb-5">
+              <View className="w-24 h-24 rounded-full border-2 border-[#E5B2B9] overflow-hidden items-center justify-center bg-[#FDF8F9]">
+                {fakeCallerPhotoValue ? (
+                  <Image source={{ uri: fakeCallerPhotoValue }} className="w-full h-full" />
+                ) : (
+                  <User size={36} color="#D81B60" />
+                )}
+              </View>
+              <Text className="text-[#D81B60] font-bold text-xs mt-2">Change Photo</Text>
+            </TouchableOpacity>
+
+            <View className="bg-[#FDF8F9] h-16 rounded-2xl flex-row items-center px-5 border border-[#E5B2B9]/50 mb-6">
+              <User size={20} color="#DDA7A5" />
+              <TextInput
+                placeholder="Caller Name (e.g. Mom)"
+                className="flex-1 ml-4 text-lg font-medium h-full"
+                value={fakeCallerNameValue}
+                onChangeText={setFakeCallerNameValue}
+              />
+            </View>
+
+            <TouchableOpacity onPress={saveFakeCallSettings} activeOpacity={0.8}>
+              <LinearGradient colors={['#E5B2B9', '#D81B60']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} className="h-16 rounded-2xl items-center justify-center shadow-lg">
+                <Text className="text-white text-lg font-bold">Save</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
