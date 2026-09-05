@@ -35,6 +35,7 @@ export default function HomeScreen() {
   const [notificationModalVisible, setNotificationModalVisible] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
   const [responding, setResponding] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [selectedSOS, setSelectedSOS] = useState(null);
   const [respondingSOS, setRespondingSOS] = useState(false);
   const [activeStatusMessage, setActiveStatusMessage] = useState('No active alerts nearby');
@@ -78,7 +79,8 @@ export default function HomeScreen() {
   const fetchReports = async () => {
     setLoadingReports(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/reports`);
+      const viewerParam = user?.phone ? `?viewer_phone=${encodeURIComponent(user.phone)}` : '';
+      const resp = await fetch(`${API_BASE_URL}/api/reports${viewerParam}`);
       const data = await resp.json();
       const reports = (data.reports || []).filter((report) => report.status !== 'resolved');
       console.log('Fetched reports - Total:', data.reports ? data.reports.length : 0, 'Non-resolved:', reports.length);
@@ -141,6 +143,42 @@ export default function HomeScreen() {
       Alert.alert('Connection Error', 'Could not update alert status.');
     } finally {
       setResponding(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!user?.phone || !selectedReport) return;
+    setConfirming(true);
+
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/reports/${selectedReport.id}/confirm`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId: user.phone }),
+      });
+      const data = await resp.json();
+
+      if (data.status === 'success' || data.status === 'already_confirmed') {
+        setSelectedReport((prev) =>
+          prev ? { ...prev, confirmation_count: data.confirmation_count, confirmed_by_me: data.confirmed_by_me } : prev
+        );
+        setReportAlerts((prev) =>
+          prev.map((report) =>
+            report.id === selectedReport.id
+              ? { ...report, confirmation_count: data.confirmation_count, confirmed_by_me: data.confirmed_by_me }
+              : report
+          )
+        );
+      } else {
+        Alert.alert('Unable to confirm', data.message || 'Could not confirm this report.');
+      }
+    } catch (err) {
+      console.error('Confirm request failed', err);
+      Alert.alert('Connection Error', 'Could not confirm this report.');
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -352,12 +390,49 @@ export default function HomeScreen() {
           )}
         </View>
 
+        {!isPoster && (
+          <View className="bg-[#FFF8E6] rounded-3xl p-4 mb-4 border border-[#F5E1B8] flex-row items-center justify-between">
+            <View className="flex-1 pr-3">
+              <Text className="text-[#4A2E35] font-semibold">
+                {selectedReport.confirmation_count > 0
+                  ? `✓ Confirmed by ${selectedReport.confirmation_count} ${selectedReport.confirmation_count === 1 ? 'person' : 'people'}`
+                  : 'Not confirmed yet'}
+              </Text>
+              <Text className="text-[#9E7A80] text-xs mt-1">Seen this happen too? Let others know it's real.</Text>
+            </View>
+            <TouchableOpacity
+              onPress={handleConfirm}
+              disabled={confirming || selectedReport.confirmed_by_me}
+              className={`px-4 py-2 rounded-full ${selectedReport.confirmed_by_me ? 'bg-[#D1F2E0]' : 'bg-[#D81B60]'}`}
+            >
+              <Text className={`text-xs font-bold ${selectedReport.confirmed_by_me ? 'text-[#1F7A4E]' : 'text-white'}`}>
+                {confirming ? 'Confirming...' : selectedReport.confirmed_by_me ? 'Confirmed' : 'Confirm'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {responder && (
           <View className="bg-[#EFF6FF] rounded-3xl p-4 mb-4 border border-[#D1E3FF]">
             <Text className="text-[#4A2E35] font-semibold mb-2">Responder Details</Text>
             <Text className="text-[#4A2E35] text-sm">Name: {responder.name || responder.phone}</Text>
             <Text className="text-[#4A2E35] text-sm mt-1">Contact: {responder.phone}</Text>
             {responder.area ? <Text className="text-[#4A2E35] text-sm mt-1">Area: {responder.area}</Text> : null}
+            {isPoster && (
+              <TouchableOpacity
+                onPress={() =>
+                  navigation.navigate('Chat', {
+                    threadType: 'report',
+                    threadId: selectedReport.id,
+                    otherPartyName: responder.name || responder.phone,
+                    otherPartyPhone: responder.phone,
+                  })
+                }
+                className="bg-white border border-[#D1E3FF] rounded-full px-4 py-2 mt-3 self-start"
+              >
+                <Text className="text-[#2563EB] font-bold text-xs">Message {responder.name || 'Responder'}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -402,6 +477,24 @@ export default function HomeScreen() {
             ) : (
               <Text className="text-white font-bold">I’m Responding</Text>
             )}
+          </TouchableOpacity>
+        )}
+
+        {alreadyResponding && (
+          <TouchableOpacity
+            onPress={() =>
+              navigation.navigate('Chat', {
+                threadType: 'report',
+                threadId: selectedReport.id,
+                otherPartyName: selectedReport.reporter?.name || selectedReport.user_id,
+                otherPartyPhone: selectedReport.reporter?.phone || selectedReport.user_id,
+              })
+            }
+            className="bg-[#FDF8F9] border border-[#D81B6050] rounded-3xl px-4 py-3 mb-4 items-center"
+          >
+            <Text className="text-[#D81B60] font-bold">
+              Message {selectedReport.reporter?.name || 'Reporter'}
+            </Text>
           </TouchableOpacity>
         )}
 
@@ -477,7 +570,12 @@ export default function HomeScreen() {
                       }}
                       style={{ backgroundColor: '#FDF8F9', marginBottom: 12, borderRadius: 22, padding: 16, borderWidth: 1, borderColor: '#E5B2B9' }}
                     >
-                      <Text style={{ color: '#4A2E35', fontWeight: '800', marginBottom: 4 }}>{report.type}</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <Text style={{ color: '#4A2E35', fontWeight: '800' }}>{report.type}</Text>
+                        {report.confirmation_count > 0 && (
+                          <Text style={{ color: '#1F7A4E', fontSize: 11, fontWeight: '700' }}>✓ {report.confirmation_count}</Text>
+                        )}
+                      </View>
                       <Text style={{ color: '#9E7A80', fontSize: 13, marginBottom: 6 }} numberOfLines={2}>{report.description}</Text>
                       <Text style={{ color: '#D81B60', fontSize: 11 }}>{formatDateTime(report.timestamp || report.created_at)}</Text>
                     </TouchableOpacity>
@@ -499,9 +597,26 @@ export default function HomeScreen() {
                   <Text style={{ color: '#9E7A80', fontSize: 13, marginBottom: 16 }}>{formatDistance(selectedSOS.distance_km)} away</Text>
 
                   {selectedSOS.responder_id ? (
-                    <Text style={{ color: '#1F7A4E', fontWeight: '700', marginBottom: 16 }}>
-                      {selectedSOS.responder_id === normalizedUserPhone ? 'You are responding to this SOS.' : `${selectedSOS.responder_name} is already responding.`}
-                    </Text>
+                    <>
+                      <Text style={{ color: '#1F7A4E', fontWeight: '700', marginBottom: 12 }}>
+                        {selectedSOS.responder_id === normalizedUserPhone ? 'You are responding to this SOS.' : `${selectedSOS.responder_name} is already responding.`}
+                      </Text>
+                      {selectedSOS.responder_id === normalizedUserPhone && (
+                        <TouchableOpacity
+                          onPress={() =>
+                            navigation.navigate('Chat', {
+                              threadType: 'sos',
+                              threadId: selectedSOS.id,
+                              otherPartyName: selectedSOS.user_name,
+                              otherPartyPhone: selectedSOS.user_phone,
+                            })
+                          }
+                          style={{ backgroundColor: '#FDF8F9', borderWidth: 1, borderColor: '#D81B6050', borderRadius: 20, paddingVertical: 14, alignItems: 'center', marginBottom: 12 }}
+                        >
+                          <Text style={{ color: '#D81B60', fontWeight: '900' }}>Message {selectedSOS.user_name}</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
                   ) : (
                     <TouchableOpacity
                       onPress={handleRespondToSOS}

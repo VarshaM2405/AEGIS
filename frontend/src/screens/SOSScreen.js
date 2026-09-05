@@ -150,9 +150,24 @@ export default function SOSScreen() {
            )}
 
            {activeSOS?.status === 'responding' && (
-             <Text className="text-white bg-black/25 text-sm text-center px-4 py-3 rounded-xl mb-4 max-w-[85%] font-bold">
-               Community Responder {activeSOS.responder_name} ({activeSOS.responder_phone}) is en route!
-             </Text>
+             <>
+               <Text className="text-white bg-black/25 text-sm text-center px-4 py-3 rounded-xl mb-3 max-w-[85%] font-bold">
+                 Community Responder {activeSOS.responder_name} ({activeSOS.responder_phone}) is en route!
+               </Text>
+               <TouchableOpacity
+                 onPress={() =>
+                   navigation.navigate('Chat', {
+                     threadType: 'sos',
+                     threadId: activeSOS.id,
+                     otherPartyName: activeSOS.responder_name,
+                     otherPartyPhone: activeSOS.responder_phone,
+                   })
+                 }
+                 className="bg-white/15 border border-white/40 rounded-full px-5 py-2 mb-4"
+               >
+                 <Text className="text-white font-bold text-xs uppercase">Message {activeSOS.responder_name}</Text>
+               </TouchableOpacity>
+             </>
            )}
 
            {countdown > 0 && (

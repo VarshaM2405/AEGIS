@@ -29,3 +29,6 @@ backend/data/*.csv
 .agent/
 .agents/
 .anthropic/
+
+# Logs
+*.log

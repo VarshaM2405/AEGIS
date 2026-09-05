@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { GlobalContext } from '../contexts/GlobalContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ArrowLeft, Phone, Share2, Shield } from 'lucide-react-native';
+import { ArrowLeft, Phone, Share2, Shield, PhoneIncoming, MapPin, Navigation } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { EXPO_DEV_URL } from '../config';
 
@@ -111,6 +111,51 @@ export default function ZonesScreen() {
                   className="p-4 items-center"
                 >
                   <Text className="text-white font-bold text-lg">SHARE CURRENT LOCATION</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => navigation.navigate('FakeCall')}
+                className="overflow-hidden rounded-3xl"
+              >
+                <LinearGradient
+                  colors={['#9E7A80', '#D81B60']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  className="p-4 items-center flex-row justify-center"
+                >
+                  <PhoneIncoming size={18} color="white" style={{ marginRight: 8 }} />
+                  <Text className="text-white font-bold text-lg">FAKE INCOMING CALL</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => navigation.navigate('StartTrip')}
+                className="overflow-hidden rounded-3xl"
+              >
+                <LinearGradient
+                  colors={['#D81B60', '#4A2E35']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  className="p-4 items-center flex-row justify-center"
+                >
+                  <Navigation size={18} color="white" style={{ marginRight: 8 }} />
+                  <Text className="text-white font-bold text-lg">SHARE MY TRIP</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => navigation.navigate('TrackTrip')}
+                className="overflow-hidden rounded-3xl"
+              >
+                <LinearGradient
+                  colors={['#4A2E35', '#D81B60']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  className="p-4 items-center flex-row justify-center"
+                >
+                  <MapPin size={18} color="white" style={{ marginRight: 8 }} />
+                  <Text className="text-white font-bold text-lg">TRACK A SHARED TRIP</Text>
                 </LinearGradient>
               </TouchableOpacity>
 
